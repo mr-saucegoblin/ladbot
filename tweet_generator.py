@@ -48,19 +48,20 @@ Each post must stand completely alone. Use Discord markdown (** for bold, no has
 
 Format each theme post exactly like this:
 
-**[emoji] [Theme name]**
+━━━━━━━━━━━━━━━━━━━━━━
+**__[emoji] [Theme name]__**
 
 [2-3 sentences explaining WHY this theme is moving right now. Be specific: macro catalyst, policy driver, commodity price, geopolitical event. Not generic.]
 
-**[TICKER]** — [Short name]
+▸ **[TICKER]** — [Short name]
 [2-3 sentences: what the company does, why it benefits from this theme this week, what makes it the right play vs peers.]
 ↳ [week_return]% last week
 
-**[TICKER]** — [Short name]
+▸ **[TICKER]** — [Short name]
 [2-3 sentences]
 ↳ [week_return]% last week
 
-**[TICKER]** — [Short name]
+▸ **[TICKER]** — [Short name]
 [2-3 sentences]
 ↳ [week_return]% last week
 
