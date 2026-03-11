@@ -230,12 +230,38 @@ async def weekly_scan():
         await channel.send(f"━━━━━━━━━━━━━━━━━━━━━━\n{post}" if i == 0 else post)
 
 
+@tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
+async def morning_greeting():
+    """Post a good morning message every day except Friday at 9 AM ET."""
+    if datetime.datetime.now(ET).weekday() == 4:  # skip Friday — scan handles it
+        return
+    channel_id = int(os.getenv("SCAN_CHANNEL_ID", 0))
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        return
+    day = datetime.datetime.now(ET).strftime("%A")
+    def _ask():
+        return claude.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=150,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": (
+                f"It's {day} morning. Write a short good morning message to the lads (2-3 sentences max). "
+                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, "
+                "Wednesday hump day, etc). No hashtags."
+            )}],
+        )
+    response = await asyncio.to_thread(_ask)
+    await channel.send(response.content[0].text)
+
+
 # ── events ────────────────────────────────────────────────────────────────────
 
 @bot.event
 async def on_ready():
     print(f"Ladbot online as {bot.user} (id: {bot.user.id})")
     weekly_scan.start()
+    morning_greeting.start()
 
 
 @bot.event
@@ -334,6 +360,31 @@ async def testscan(ctx: commands.Context):
         return
     for i, post in enumerate(posts):
         await channel.send(f"━━━━━━━━━━━━━━━━━━━━━━\n{post}" if i == 0 else post)
+
+
+@bot.command(name="testmorning")
+async def testmorning(ctx: commands.Context):
+    """Test the morning greeting — always posts to the test channel."""
+    TEST_CHANNEL_ID = 891720029861732356
+    channel = bot.get_channel(TEST_CHANNEL_ID)
+    if not channel:
+        await ctx.send("Test channel not found.")
+        return
+    await ctx.send(f"Morning greeting will post in <#{TEST_CHANNEL_ID}>...")
+    day = datetime.datetime.now(ET).strftime("%A")
+    def _ask():
+        return claude.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=150,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": (
+                f"It's {day} morning. Write a short good morning message to the lads (2-3 sentences max). "
+                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, "
+                "Wednesday hump day, etc). No hashtags."
+            )}],
+        )
+    response = await asyncio.to_thread(_ask)
+    await channel.send(response.content[0].text)
 
 
 # ── entrypoint ────────────────────────────────────────────────────────────────
