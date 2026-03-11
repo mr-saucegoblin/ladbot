@@ -302,6 +302,24 @@ async def scan(ctx: commands.Context):
         await ctx.send(post)
 
 
+@bot.command(name="testscan")
+async def testscan(ctx: commands.Context):
+    """Test the Friday auto-post — always posts to the test channel."""
+    TEST_CHANNEL_ID = 891720029861732356
+    channel = bot.get_channel(TEST_CHANNEL_ID)
+    if not channel:
+        await ctx.send("Test channel not found.")
+        return
+    await ctx.send(f"Running scan, results will post in <#{TEST_CHANNEL_ID}>...")
+    posts, error = await _run_pipeline()
+    if error:
+        await channel.send(f"Scan failed: {error}")
+        return
+    await channel.send(f"Friday picks — {len(posts)} updates:")
+    for post in posts:
+        await channel.send(post)
+
+
 # ── entrypoint ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
