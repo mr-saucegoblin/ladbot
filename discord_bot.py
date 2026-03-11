@@ -137,9 +137,13 @@ async def _scan_intro() -> str:
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=100,
+            max_tokens=120,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": "Write one short message (1-2 sentences max) announcing you're about to go check the financial news and analyze TSX themes. Stay fully in character. No hashtags."}],
+            messages=[{"role": "user", "content": (
+                "Write one short message (1-2 sentences max) announcing you're about to scan last week's news "
+                "from multiple sources and analyze themes across the full TSX — not just small caps, all of it. "
+                "Stay fully in character. No hashtags."
+            )}],
         )
     response = await asyncio.to_thread(_ask)
     return response.content[0].text
@@ -218,11 +222,11 @@ async def weekly_scan():
         print("SCAN_CHANNEL_ID not set or channel not found — skipping weekly scan")
         return
     await channel.send(await _scan_intro())
+    await channel.send("━━━━━━━━━━━━━━━━━━━━━━")
     posts, error = await _run_pipeline()
     if error:
         await channel.send(f"Weekly scan failed: {error}")
         return
-    await channel.send(f"Friday picks — {len(posts)} updates:")
     for post in posts:
         await channel.send(post)
 
@@ -325,11 +329,11 @@ async def testscan(ctx: commands.Context):
         return
     await ctx.send(f"Running scan, results will post in <#{TEST_CHANNEL_ID}>...")
     await channel.send(await _scan_intro())
+    await channel.send("━━━━━━━━━━━━━━━━━━━━━━")
     posts, error = await _run_pipeline()
     if error:
         await channel.send(f"Scan failed: {error}")
         return
-    await channel.send(f"Friday picks — {len(posts)} updates:")
     for post in posts:
         await channel.send(post)
 
