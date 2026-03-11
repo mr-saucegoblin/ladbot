@@ -99,7 +99,7 @@ def _resolve_name(message: discord.Message) -> str:
     return message.author.display_name
 
 
-HISTORY_FILE = os.path.join(os.path.dirname(__file__), "chat_history.json")
+HISTORY_FILE = os.environ.get("HISTORY_FILE", os.path.join(os.path.dirname(__file__), "chat_history.json"))
 
 
 def _load_histories() -> dict[int, list[dict]]:
