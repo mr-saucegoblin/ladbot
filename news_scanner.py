@@ -14,10 +14,32 @@ socket.setdefaulttimeout(10)
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 RSS_FEEDS = {
-    "Financial Post":    "https://financialpost.com/feed",
-    "Yahoo Finance CA":  "https://ca.finance.yahoo.com/rss/topfinstories",
-    "Stockhouse":        "https://stockhouse.com/rss/news",
-    "Mining.com":        "https://www.mining.com/feed/",
+    "Financial Post":        "https://financialpost.com/feed",
+    "Yahoo Finance CA":      "https://ca.finance.yahoo.com/rss/topfinstories",
+    "Stockhouse":            "https://stockhouse.com/rss/news",
+    "CBC Business":          "https://www.cbc.ca/cmlink/rss-business",
+    "BNN Bloomberg":         "https://www.bnnbloomberg.ca/rss",
+    "Northern Miner":        "https://www.northernminer.com/feed/",
+    "Junior Mining Network": "https://www.juniorminingnetwork.com/feed",
+    "Kitco News":            "https://www.kitco.com/rss/kitconews.rss",
+    "Canadian Mining Journal": "https://www.canadianminingjournal.com/feed/",
+    "Proactive Investors CA": "https://www.proactiveinvestors.ca/rss/news_feed.rss",
+    # Energy & commodities
+    "OilPrice.com":          "https://oilprice.com/rss/main",
+    "Rigzone":               "https://www.rigzone.com/news/rss/rigzone_news.aspx",
+    "Energy Now Canada":     "https://energynow.ca/feed/",
+    # Defence
+    "Breaking Defense":      "https://breakingdefense.com/feed/",
+    "Defense News":          "https://www.defensenews.com/rss/",
+    # Tech
+    "IT World Canada":       "https://www.itworldcanada.com/feed",
+    "TechCrunch":            "https://techcrunch.com/feed/",
+    # Cannabis
+    "MJBizDaily":            "https://mjbizdaily.com/feed/",
+    # Broader markets
+    "Reuters Business":      "https://feeds.reuters.com/reuters/businessNews",
+    "MarketWatch":           "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadline",
+    "Globe and Mail Business": "https://www.theglobeandmail.com/business/?service=rss",
 }
 
 LOOKBACK_DAYS = 7
