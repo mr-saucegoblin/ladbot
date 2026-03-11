@@ -123,7 +123,7 @@ def detect_themes(headlines: list[str]) -> list[dict]:
     print(f"Consolidating {len(raw_themes)} raw themes...")
     message = client.messages.create(
         model=MODEL,
-        max_tokens=1024,
+        max_tokens=4096,
         messages=[{"role": "user", "content": _build_consolidation_prompt(raw_themes)}],
     )
     data = _parse_json(message.content[0].text.strip(), "consolidation")
