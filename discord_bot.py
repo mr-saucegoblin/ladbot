@@ -17,6 +17,7 @@ import asyncio
 import datetime
 import json
 import os
+import random
 import time
 from zoneinfo import ZoneInfo
 import anthropic
@@ -240,15 +241,16 @@ async def morning_greeting():
     if not channel:
         return
     day = datetime.datetime.now(ET).strftime("%A")
+    lad = random.choice(list(USERNAME_MAP.values()))
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=150,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": (
-                f"It's {day} morning. Write a short good morning message to the lads (5 sentences max). "
-                "Stay fully in character, feel free to reference a lad in the message. Reference the day if relevant (e.g. Monday back to the grind, "
-                "Wednesday hump day, etc). No hashtags."
+                f"It's {day} morning. Write a short good morning message to the lads (2-3 sentences max). "
+                f"Make sure to reference {lad} specifically. "
+                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, Wednesday hump day, etc). No hashtags."
             )}],
         )
     response = await asyncio.to_thread(_ask)
@@ -372,6 +374,7 @@ async def testmorning(ctx: commands.Context):
         return
     await ctx.send(f"Morning greeting will post in <#{TEST_CHANNEL_ID}>...")
     day = datetime.datetime.now(ET).strftime("%A")
+    lad = random.choice(list(USERNAME_MAP.values()))
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
@@ -379,8 +382,8 @@ async def testmorning(ctx: commands.Context):
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": (
                 f"It's {day} morning. Write a short good morning message to the lads (2-3 sentences max). "
-                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, "
-                "Wednesday hump day, etc). No hashtags."
+                f"Make sure to reference {lad} specifically. "
+                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, Wednesday hump day, etc). No hashtags."
             )}],
         )
     response = await asyncio.to_thread(_ask)
