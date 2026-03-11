@@ -14,7 +14,7 @@ load_dotenv()
 MODEL = "claude-sonnet-4-6"
 
 
-def _build_thread_prompt(theme_picks: list[dict], run_date: str) -> str:
+def _build_thread_prompt(theme_picks: list[dict], run_date: str, headline_count: int = 0) -> str:
     total_posts = len(theme_picks) + 1  # hook + themes
 
     themes_block = ""
@@ -40,8 +40,8 @@ Week of: {run_date}
 ## Instructions
 Write exactly {total_posts} posts.
 
-Post 1 — Hook (max 240 chars):
-Short, punchy. State it's this week's TSX thematic watchlist. Tease {len(theme_picks)} themes. End with a down-arrow emoji.
+Post 1 — Hook (max 280 chars):
+Short, punchy. State it's this week's TSX thematic watchlist. Mention that {headline_count} articles were scanned across multiple sources. Tease {len(theme_picks)} themes. End with a down-arrow emoji.
 
 Posts 2 to {total_posts} — One per theme:
 Each post must stand completely alone. Use Discord markdown (** for bold, no hashtags).
@@ -78,7 +78,7 @@ Respond ONLY with valid JSON, no markdown:
 }}"""
 
 
-def generate_thread(theme_picks: list[dict]) -> list[str]:
+def generate_thread(theme_picks: list[dict], headline_count: int = 0) -> list[str]:
     """
     Generate a Discord post thread from theme picks.
     Returns a list of post strings ready to publish.
@@ -89,7 +89,7 @@ def generate_thread(theme_picks: list[dict]) -> list[str]:
     message = client.messages.create(
         model=MODEL,
         max_tokens=4096,
-        messages=[{"role": "user", "content": _build_thread_prompt(theme_picks, run_date)}],
+        messages=[{"role": "user", "content": _build_thread_prompt(theme_picks, run_date, headline_count)}],
     )
 
     raw = message.content[0].text.strip()

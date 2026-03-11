@@ -175,7 +175,7 @@ async def _run_pipeline() -> tuple[list[str] | None, str | None]:
         if not theme_picks:
             return None, "No valid company picks found."
 
-        posts = generate_thread(theme_picks)
+        posts = generate_thread(theme_picks, headline_count=len(headlines))
         return posts, None
 
     return await asyncio.to_thread(_blocking)
