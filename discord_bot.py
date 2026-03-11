@@ -222,13 +222,12 @@ async def weekly_scan():
         print("SCAN_CHANNEL_ID not set or channel not found — skipping weekly scan")
         return
     await channel.send(await _scan_intro())
-    await channel.send("━━━━━━━━━━━━━━━━━━━━━━")
     posts, error = await _run_pipeline()
     if error:
         await channel.send(f"Weekly scan failed: {error}")
         return
-    for post in posts:
-        await channel.send(post)
+    for i, post in enumerate(posts):
+        await channel.send(f"━━━━━━━━━━━━━━━━━━━━━━\n{post}" if i == 0 else post)
 
 
 # ── events ────────────────────────────────────────────────────────────────────
@@ -329,13 +328,12 @@ async def testscan(ctx: commands.Context):
         return
     await ctx.send(f"Running scan, results will post in <#{TEST_CHANNEL_ID}>...")
     await channel.send(await _scan_intro())
-    await channel.send("━━━━━━━━━━━━━━━━━━━━━━")
     posts, error = await _run_pipeline()
     if error:
         await channel.send(f"Scan failed: {error}")
         return
-    for post in posts:
-        await channel.send(post)
+    for i, post in enumerate(posts):
+        await channel.send(f"━━━━━━━━━━━━━━━━━━━━━━\n{post}" if i == 0 else post)
 
 
 # ── entrypoint ────────────────────────────────────────────────────────────────
