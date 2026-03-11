@@ -14,12 +14,14 @@ Conversation:
 """
 
 import asyncio
+import datetime
 import json
 import os
 import time
+from zoneinfo import ZoneInfo
 import anthropic
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from news_scanner import fetch_headlines
@@ -189,11 +191,35 @@ async def _send_long(channel: discord.abc.Messageable, text: str, reply_to: disc
             await channel.send(chunk)
 
 
+# ── scheduled tasks ───────────────────────────────────────────────────────────
+
+ET = ZoneInfo("America/Toronto")
+
+@tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
+async def weekly_scan():
+    """Auto-post Friday picks at 9 AM ET."""
+    if datetime.datetime.now(ET).weekday() != 4:  # 4 = Friday
+        return
+    channel_id = int(os.getenv("SCAN_CHANNEL_ID", 0))
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        print("SCAN_CHANNEL_ID not set or channel not found — skipping weekly scan")
+        return
+    posts, error = await _run_pipeline()
+    if error:
+        await channel.send(f"Weekly scan failed: {error}")
+        return
+    await channel.send(f"Friday picks — {len(posts)} updates:")
+    for post in posts:
+        await channel.send(post)
+
+
 # ── events ────────────────────────────────────────────────────────────────────
 
 @bot.event
 async def on_ready():
     print(f"Ladbot online as {bot.user} (id: {bot.user.id})")
+    weekly_scan.start()
 
 
 @bot.event
