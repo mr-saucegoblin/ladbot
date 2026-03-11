@@ -142,7 +142,7 @@ async def _scan_intro() -> str:
             messages=[{"role": "user", "content": (
                 "Write one short message (1-2 sentences max) announcing you're about to scan last week's news "
                 "from multiple sources and analyze themes across the full TSX — not just small caps, all of it. "
-                "Stay fully in character. No hashtags."
+                "Stay fully in character. Since its the morning probably should mention hangover, dart and coffee. No hashtags."
             )}],
         )
     response = await asyncio.to_thread(_ask)
