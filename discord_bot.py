@@ -132,6 +132,18 @@ claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+async def _scan_intro() -> str:
+    """Generate a one-off in-character message announcing the scan is starting."""
+    def _ask():
+        return claude.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=100,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": "Write one short message (1-2 sentences max) announcing you're about to go check the financial news and analyze TSX themes. Stay fully in character. No hashtags."}],
+        )
+    response = await asyncio.to_thread(_ask)
+    return response.content[0].text
+
 def _trim_history(channel_id: int) -> None:
     h = histories.get(channel_id, [])
     if len(h) > MAX_HISTORY:
@@ -205,6 +217,7 @@ async def weekly_scan():
     if not channel:
         print("SCAN_CHANNEL_ID not set or channel not found — skipping weekly scan")
         return
+    await channel.send(await _scan_intro())
     posts, error = await _run_pipeline()
     if error:
         await channel.send(f"Weekly scan failed: {error}")
@@ -311,6 +324,7 @@ async def testscan(ctx: commands.Context):
         await ctx.send("Test channel not found.")
         return
     await ctx.send(f"Running scan, results will post in <#{TEST_CHANNEL_ID}>...")
+    await channel.send(await _scan_intro())
     posts, error = await _run_pipeline()
     if error:
         await channel.send(f"Scan failed: {error}")
