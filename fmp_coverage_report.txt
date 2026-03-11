@@ -1,0 +1,22 @@
+=== FMP Coverage Report ===
+
+Universe:  369 tickers
+Covered:   0 (0.0%)
+Missing:   0
+Errors:    10
+
+--- Covered tickers ---
+
+--- Missing tickers (no FMP data) ---
+
+--- Errors ---
+  AAUC.TO         403 Client Error: Forbidden for url: https://financialmodelingprep.com/api/v3/quote/AAUC.TO?apikey=sbwwEsUKEJPS6p2waHTRx6ux4WG1m8ja
+  AAV.TO          403 Client Error: Forbidden for url: https://financialmodelingprep.com/api/v3/quote/AAV.TO?apikey=sbwwEsUKEJPS6p2waHTRx6ux4WG1m8ja
+  ABX.TO          403 Client Error: Forbidden for url: https://financialmodelingprep.com/api/v3/quote/ABX.TO?apikey=sbwwEsUKEJPS6p2waHTRx6ux4WG1m8ja
+  AC.TO           403 Client Error: Forbidden for url: https://financialmodelingprep.com/api/v3/quote/AC.TO?apikey=sbwwEsUKEJPS6p2waHTRx6ux4WG1m8ja
+  ACO-X.TO        403 Client Error: Forbidden for url: https://financialmodelingprep.com/api/v3/quote/ACO-X.TO?apikey=sbwwEsUKEJPS6p2waHTRx6ux4WG1m8ja
+  AEM.TO          403 Client Error: Forbidden for url: https://financialmodelingprep.com/api/v3/quote/AEM.TO?apikey=sbwwEsUKEJPS6p2waHTRx6ux4WG1m8ja
+  AG.TO           403 Client Error: Forbidden for url: https://financialmodelingprep.com/api/v3/quote/AG.TO?apikey=sbwwEsUKEJPS6p2waHTRx6ux4WG1m8ja
+  AGI.TO          403 Client Error: Forbidden for url: https://financialmodelingprep.com/api/v3/quote/AGI.TO?apikey=sbwwEsUKEJPS6p2waHTRx6ux4WG1m8ja
+  AIF.TO          403 Client Error: Forbidden for url: https://financialmodelingprep.com/api/v3/quote/AIF.TO?apikey=sbwwEsUKEJPS6p2waHTRx6ux4WG1m8ja
+  ALA.TO          403 Client Error: Forbidden for url: https://financialmodelingprep.com/api/v3/quote/ALA.TO?apikey=sbwwEsUKEJPS6p2waHTRx6ux4WG1m8ja

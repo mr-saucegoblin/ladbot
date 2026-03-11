@@ -1,0 +1,7 @@
+anthropic
+discord.py
+feedparser
+openpyxl
+python-dotenv
+requests
+yfinance
