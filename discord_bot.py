@@ -246,8 +246,8 @@ async def morning_greeting():
             max_tokens=150,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": (
-                f"It's {day} morning. Write a short good morning message to the lads (2-3 sentences max). "
-                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, "
+                f"It's {day} morning. Write a short good morning message to the lads (5 sentences max). "
+                "Stay fully in character, feel free to reference a lad in the message. Reference the day if relevant (e.g. Monday back to the grind, "
                 "Wednesday hump day, etc). No hashtags."
             )}],
         )
