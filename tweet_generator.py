@@ -1,6 +1,6 @@
 """
-Generate a post thread for X (Premium long-form format).
-Hook + one long post per theme + CTA.
+Generate a Discord post thread.
+Hook + one post per theme.
 """
 
 import json
@@ -15,7 +15,7 @@ MODEL = "claude-sonnet-4-6"
 
 
 def _build_thread_prompt(theme_picks: list[dict], run_date: str) -> str:
-    total_posts = len(theme_picks) + 2  # hook + themes + cta
+    total_posts = len(theme_picks) + 1  # hook + themes
 
     themes_block = ""
     for i, entry in enumerate(theme_picks, 1):
@@ -31,48 +31,45 @@ def _build_thread_prompt(theme_picks: list[dict], run_date: str) -> str:
             f"Picks:\n{picks_lines}\n"
         )
 
-    return f"""You are writing a weekly investing post thread for a Canadian markets account called @LadbotTSX.
+    return f"""You are writing a weekly TSX thematic watchlist for a Discord server.
 Week of: {run_date}
 
 ## Data
 {themes_block}
 
 ## Instructions
-Write a thread of exactly {total_posts} posts.
+Write exactly {total_posts} posts.
 
 Post 1 — Hook (max 240 chars):
-Short, punchy. State it's last week's TSX thematic watchlist. Tease {len(theme_picks)} themes. End with a down-arrow.
+Short, punchy. State it's this week's TSX thematic watchlist. Tease {len(theme_picks)} themes. End with a down-arrow emoji.
 
-Posts 2 to {len(theme_picks) + 1} — One per theme (long-form, 700–1000 chars each):
-Each post must stand completely alone — a reader who only sees this one post gets the full picture.
+Posts 2 to {total_posts} — One per theme:
+Each post must stand completely alone. Use Discord markdown (** for bold, no hashtags).
 
-Format:
-[emoji] [Theme name]
+Format each theme post exactly like this:
+
+**[emoji] [Theme name]**
 
 [2-3 sentences explaining WHY this theme is moving right now. Be specific: macro catalyst, policy driver, commodity price, geopolitical event. Not generic.]
 
-[For each pick, write 2-3 sentences: what the company does, exactly why it benefits from THIS theme THIS week, and what makes it the right play vs peers. Then show the return.]
+**[TICKER]** — [Short name]
+[2-3 sentences: what the company does, why it benefits from this theme this week, what makes it the right play vs peers.]
+↳ [week_return]% last week
 
-• [TICKER] — [Short name]
-  [2-3 sentence explanation of why this specific stock is the right play]
-  [week_return]% last week
+**[TICKER]** — [Short name]
+[2-3 sentences]
+↳ [week_return]% last week
 
-• [TICKER] — [Short name]
-  [2-3 sentence explanation]
-  [week_return]% last week
-
-• [TICKER] — [Short name]
-  [2-3 sentence explanation]
-  [week_return]% last week
-
-Post {total_posts} — CTA (max 240 chars):
-Tell people to follow @LadbotTSX for weekly picks every Monday. Keep it short.
+**[TICKER]** — [Short name]
+[2-3 sentences]
+↳ [week_return]% last week
 
 ## Rules
 - Tone: confident, analytical, like a buy-side analyst writing a quick note. No fluff, no hedging.
 - Use the exact tickers and weekly returns from the data above.
 - Short company names (e.g. "Barrick" not "Barrick Mining Corp").
 - Format week return with + for positive (e.g. +4.2%) and nothing extra for negative (e.g. -1.8%).
+- No Twitter/X references anywhere.
 
 Respond ONLY with valid JSON, no markdown:
 {{
@@ -82,7 +79,7 @@ Respond ONLY with valid JSON, no markdown:
 
 def generate_thread(theme_picks: list[dict]) -> list[str]:
     """
-    Generate a post thread from theme picks.
+    Generate a Discord post thread from theme picks.
     Returns a list of post strings ready to publish.
     """
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
