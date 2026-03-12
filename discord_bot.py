@@ -18,6 +18,7 @@ import datetime
 import json
 import os
 import random
+import shutil
 import time
 from zoneinfo import ZoneInfo
 import anthropic
@@ -25,6 +26,8 @@ import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
+import yfinance as yf
+from database import get_conn
 from news_scanner import fetch_headlines
 from theme_detector import detect_themes
 from company_mapper import map_theme_to_companies
@@ -155,16 +158,69 @@ def _trim_history(channel_id: int) -> None:
         histories[channel_id] = h[-MAX_HISTORY:]
 
 
-async def _run_pipeline() -> tuple[list[str] | None, str | None]:
+def _save_weekly_picks(theme_picks: list[dict]) -> None:
+    """Save this week's picks to weekly_runs for next week's recap."""
+    run_date = datetime.datetime.now(ET).strftime("%Y-%m-%d")
+    picks_data = []
+    for entry in theme_picks:
+        pick = entry["picks"][0] if entry["picks"] else None
+        if pick and pick.get("price"):
+            picks_data.append({
+                "ticker": pick["ticker"],
+                "name": pick["name"],
+                "theme": entry["theme"]["label"],
+                "price": pick["price"],
+            })
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO weekly_runs (run_date, companies_json) VALUES (?, ?)",
+            (run_date, json.dumps(picks_data)),
+        )
+
+
+def _load_last_week_recap() -> str | None:
+    """Fetch last week's picks from DB and return their performance as a formatted string."""
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT run_date, companies_json FROM weekly_runs ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        if not row:
+            return None
+        picks = json.loads(row["companies_json"])
+        from_date = row["run_date"]
+        lines = []
+        for p in picks:
+            entry_price = p.get("price")
+            if not entry_price:
+                continue
+            try:
+                hist = yf.Ticker(p["ticker"]).history(period="2d")
+                if hist.empty:
+                    continue
+                current = round(hist["Close"].iloc[-1], 2)
+                ret = round((current - entry_price) / entry_price * 100, 1)
+                sign = "+" if ret >= 0 else ""
+                lines.append(f"**{p['ticker']}** · {p['theme']} → {sign}{ret}%")
+            except Exception:
+                continue
+        if not lines:
+            return None
+        return f"**Last week's picks** ({from_date}):\n" + "\n".join(lines)
+    except Exception:
+        return None
+
+
+async def _run_pipeline() -> tuple[list[str] | None, list[dict] | None, str | None]:
     """Run the full scan → theme → picks → generate pipeline in a thread."""
     def _blocking():
         headlines = fetch_headlines()
         if not headlines:
-            return None, "No headlines fetched."
+            return None, None, "No headlines fetched."
 
         themes = detect_themes(headlines)
         if not themes:
-            return None, "No themes detected above threshold."
+            return None, None, "No themes detected above threshold."
 
         top_themes = themes[:3]
         theme_picks = []
@@ -174,10 +230,10 @@ async def _run_pipeline() -> tuple[list[str] | None, str | None]:
                 theme_picks.append({"theme": theme, "picks": picks})
 
         if not theme_picks:
-            return None, "No valid company picks found."
+            return None, None, "No valid company picks found."
 
         posts = generate_thread(theme_picks, headline_count=len(headlines))
-        return posts, None
+        return posts, theme_picks, None
 
     return await asyncio.to_thread(_blocking)
 
@@ -222,11 +278,15 @@ async def weekly_scan():
     if not channel:
         print("SCAN_CHANNEL_ID not set or channel not found — skipping weekly scan")
         return
+    recap = await asyncio.to_thread(_load_last_week_recap)
     await channel.send(await _scan_intro())
-    posts, error = await _run_pipeline()
+    posts, theme_picks, error = await _run_pipeline()
     if error:
         await channel.send(f"Weekly scan failed: {error}")
         return
+    await asyncio.to_thread(_save_weekly_picks, theme_picks)
+    if recap:
+        await channel.send(recap)
     for i, post in enumerate(posts):
         await channel.send(f"━━━━━━━━━━━━━━━━━━━━━━\n{post}" if i == 0 else post)
 
@@ -262,6 +322,12 @@ async def morning_greeting():
 @bot.event
 async def on_ready():
     print(f"Ladbot online as {bot.user} (id: {bot.user.id})")
+    # Copy db to volume on first boot so weekly_runs persist across redeploys
+    data_db = os.environ.get("DB_PATH", "")
+    app_db = os.path.join(os.path.dirname(__file__), "ladbot.db")
+    if data_db and not os.path.exists(data_db) and os.path.exists(app_db):
+        shutil.copy(app_db, data_db)
+        print(f"Copied {app_db} → {data_db}")
     weekly_scan.start()
     morning_greeting.start()
 
@@ -335,7 +401,7 @@ async def scan(ctx: commands.Context):
     """Run the full pipeline and post this week's thematic picks."""
     await ctx.send("Running scan... this'll take a minute.")
 
-    posts, error = await _run_pipeline()
+    posts, _theme_picks, error = await _run_pipeline()
 
     if error:
         await ctx.send(f"Scan failed: {error}")
@@ -355,11 +421,14 @@ async def testscan(ctx: commands.Context):
         await ctx.send("Test channel not found.")
         return
     await ctx.send(f"Running scan, results will post in <#{TEST_CHANNEL_ID}>...")
+    recap = await asyncio.to_thread(_load_last_week_recap)
     await channel.send(await _scan_intro())
-    posts, error = await _run_pipeline()
+    posts, _theme_picks, error = await _run_pipeline()
     if error:
         await channel.send(f"Scan failed: {error}")
         return
+    if recap:
+        await channel.send(recap)
     for i, post in enumerate(posts):
         await channel.send(f"━━━━━━━━━━━━━━━━━━━━━━\n{post}" if i == 0 else post)
 

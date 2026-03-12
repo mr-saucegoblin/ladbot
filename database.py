@@ -5,7 +5,7 @@ SQLite database setup and connection helper.
 import sqlite3
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "ladbot.db")
+DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "ladbot.db"))
 
 
 def get_conn() -> sqlite3.Connection:
