@@ -71,8 +71,9 @@ def _build_consolidation_prompt(raw_themes: list[dict]) -> str:
 {themes_block}
 
 ## Instructions
-- Merge any themes that are clearly the same story or heavily overlapping (e.g. "Gold Price Surge" and "Gold and Precious Metals Rally" → "Gold & Precious Metals").
-- Keep themes that are genuinely distinct even if related (e.g. "Critical Minerals" and "Uranium" can stay separate if both have strong independent coverage).
+- Merge any themes that share the same underlying macro catalyst, sector, or commodity — even if they are framed differently. For example: "Iran War Oil Price Shock" and "Canadian Energy Oilfield Windfall" are both driven by the same oil supply shock and MUST be merged into one energy theme.
+- The final list must have NO TWO THEMES from the same primary sector (energy, mining/metals, financials, tech, etc). If two energy themes survive merging, keep only the higher-scored one.
+- Keep themes that are genuinely distinct in sector AND catalyst (e.g. "Uranium" and "Gold M&A" are different sectors and can stay separate).
 - Output the final top {FINAL_N_THEMES} themes after merging, re-scored and re-ranked.
 - When merging, use the higher score and write a fresh rationale that covers the full merged story.
 
