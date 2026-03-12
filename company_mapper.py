@@ -15,7 +15,7 @@ from database import get_conn
 load_dotenv()
 
 MODEL = "claude-sonnet-4-6"
-TOP_COMPANIES = 3  # how many stock picks to return per theme
+TOP_COMPANIES = 1  # single best pick per theme
 
 
 def _fetch_all_companies() -> list[dict]:
@@ -44,10 +44,10 @@ def _build_mapping_prompt(theme: str, theme_rationale: str, companies: list[dict
 {companies_block}
 
 ## Instructions
-- Select the {TOP_COMPANIES} TSX companies most directly exposed to this week's theme.
+- Select the SINGLE best TSX company most directly exposed to this week's theme.
 - Base your selection on the thematic tags and industry — not just name recognition.
 - Prefer pure-play exposure over diversified conglomerates.
-- For each pick, write one sentence explaining why it fits the theme this week.
+- Write one sentence explaining why this company is the best play for this theme right now.
 
 Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.
 
@@ -62,15 +62,46 @@ Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.
 }}"""
 
 
+def _market_cap_label(market_cap: int | None) -> str | None:
+    if not market_cap:
+        return None
+    if market_cap >= 10_000_000_000:
+        return "Large Cap"
+    if market_cap >= 2_000_000_000:
+        return "Mid Cap"
+    return "Small Cap"
+
+
 def _fetch_price_data(ticker: str) -> dict | None:
-    """Fetch current price and 1-week return from yfinance. Returns None if unavailable."""
+    """Fetch price, week return, and supplementary data from yfinance. Returns None if price unavailable."""
     try:
-        hist = yf.Ticker(ticker).history(period="5d")
+        t = yf.Ticker(ticker)
+        hist = t.history(period="5d")
         if hist.empty or len(hist) < 2:
             return None
         price = round(hist["Close"].iloc[-1], 2)
         week_return = round((hist["Close"].iloc[-1] / hist["Close"].iloc[0] - 1) * 100, 1)
-        return {"price": price, "week_return": week_return}
+
+        # Extra fields from info — all optional, fail gracefully
+        try:
+            info = t.info
+            week_high = info.get("fiftyTwoWeekHigh")
+            week_low = info.get("fiftyTwoWeekLow")
+            vol = info.get("volume")
+            avg_vol = info.get("averageVolume")
+            volume_ratio = round(vol / avg_vol, 1) if vol and avg_vol else None
+            market_cap_label = _market_cap_label(info.get("marketCap"))
+        except Exception:
+            week_high = week_low = volume_ratio = market_cap_label = None
+
+        return {
+            "price": price,
+            "week_return": week_return,
+            "week_high": week_high,
+            "week_low": week_low,
+            "volume_ratio": volume_ratio,
+            "market_cap_label": market_cap_label,
+        }
     except Exception:
         return None
 
@@ -108,11 +139,14 @@ def map_theme_to_companies(theme: str, rationale: str) -> list[dict]:
     for pick in picks:
         data = _fetch_price_data(pick["ticker"])
         if data:
-            pick["price"] = data["price"]
-            pick["week_return"] = data["week_return"]
+            pick.update(data)
         else:
             pick["price"] = None
             pick["week_return"] = None
+            pick["week_high"] = None
+            pick["week_low"] = None
+            pick["volume_ratio"] = None
+            pick["market_cap_label"] = None
 
     # Filter out any picks where price fetch failed (likely bad ticker)
     valid = [p for p in picks if p["price"] is not None]
