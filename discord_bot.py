@@ -225,10 +225,14 @@ async def _run_pipeline() -> tuple[list[str] | None, list[dict] | None, str | No
 
         top_themes = themes[:3]
         theme_picks = []
+        used_sectors: set[str] = set()
         for theme in top_themes:
-            picks = map_theme_to_companies(theme["label"], theme["rationale"])
+            picks = map_theme_to_companies(theme["label"], theme["rationale"], exclude_sectors=used_sectors)
             if picks:
                 theme_picks.append({"theme": theme, "picks": picks})
+                sector = picks[0].get("sector")
+                if sector:
+                    used_sectors.add(sector)
 
         if not theme_picks:
             return None, None, "No valid company picks found."

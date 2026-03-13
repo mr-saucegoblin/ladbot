@@ -83,6 +83,7 @@ def _fetch_price_data(ticker: str) -> dict | None:
         week_return = round((hist["Close"].iloc[-1] / hist["Close"].iloc[0] - 1) * 100, 1)
 
         # Extra fields from info — all optional, fail gracefully
+        sector = None
         try:
             info = t.info
             week_high = info.get("fiftyTwoWeekHigh")
@@ -91,6 +92,7 @@ def _fetch_price_data(ticker: str) -> dict | None:
             avg_vol = info.get("averageVolume")
             volume_ratio = round(vol / avg_vol, 1) if vol and avg_vol else None
             market_cap_label = _market_cap_label(info.get("marketCap"))
+            sector = info.get("sector")
         except Exception:
             week_high = week_low = volume_ratio = market_cap_label = None
 
@@ -101,21 +103,26 @@ def _fetch_price_data(ticker: str) -> dict | None:
             "week_low": week_low,
             "volume_ratio": volume_ratio,
             "market_cap_label": market_cap_label,
+            "sector": sector,
         }
     except Exception:
         return None
 
 
-def map_theme_to_companies(theme: str, rationale: str) -> list[dict]:
+def map_theme_to_companies(theme: str, rationale: str, exclude_sectors: set[str] | None = None) -> list[dict]:
     """
     Given a theme label and rationale, returns top TSX company picks
     with live prices. Each dict has: ticker, name, reason, price.
+    exclude_sectors: sector strings already used by prior picks — filtered out before Claude sees the list.
     """
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     all_companies = _fetch_all_companies()
 
     if not all_companies:
         raise RuntimeError("Company database is empty. Run load_universe.py first.")
+
+    if exclude_sectors:
+        all_companies = [c for c in all_companies if c.get("sector") not in exclude_sectors]
 
     print(f"Matching theme '{theme}' against {len(all_companies)} companies...")
 
