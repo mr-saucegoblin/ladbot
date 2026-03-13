@@ -66,6 +66,7 @@ Format each theme post exactly like this:
 
 **[TICKER]** — [Short name] · [market_cap_label]
 [2-3 sentences: what the company does, why it's the single best play for this theme this week vs all alternatives.]
+
 💰 [price] · ↳ [week_return]% last week
 📊 52-wk: [week_low] – [week_high] · Vol: [volume_ratio]x avg
 
