@@ -239,10 +239,12 @@ async def _run_pipeline() -> tuple[list[str] | None, list[dict] | None, str | No
     return await asyncio.to_thread(_blocking)
 
 
-async def _send_posts_with_charts(channel: discord.abc.Messageable, posts: list[str], theme_picks: list[dict], prefix: str = "") -> None:
+_SEP = "━━━━━━━━━━━━━━━━━━━━━━"
+
+async def _send_posts_with_charts(channel: discord.abc.Messageable, posts: list[str], theme_picks: list[dict]) -> None:
     """Send posts and attach a stock chart after each theme post (posts[1:])."""
     for i, post in enumerate(posts):
-        text = f"{prefix}\n{post}" if (i == 0 and prefix) else post
+        text = f"{_SEP}\n{post}" if i > 0 else post
         await _send_long(channel, text)
         if i > 0:
             idx = i - 1
@@ -305,7 +307,7 @@ async def weekly_scan():
     await asyncio.to_thread(_save_weekly_picks, theme_picks)
     if recap:
         await channel.send(recap)
-    await _send_posts_with_charts(channel, posts, theme_picks, prefix="━━━━━━━━━━━━━━━━━━━━━━")
+    await _send_posts_with_charts(channel, posts, theme_picks)
 
 
 @tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
@@ -445,7 +447,7 @@ async def testscan(ctx: commands.Context):
         return
     if recap:
         await channel.send(recap)
-    await _send_posts_with_charts(channel, posts, theme_picks, prefix="━━━━━━━━━━━━━━━━━━━━━━")
+    await _send_posts_with_charts(channel, posts, theme_picks)
 
 
 @bot.command(name="testmorning")

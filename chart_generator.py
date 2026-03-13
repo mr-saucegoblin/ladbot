@@ -6,6 +6,7 @@ Returns the path to a temporary PNG file. Caller is responsible for cleanup.
 import os
 import tempfile
 
+import pandas
 import matplotlib
 matplotlib.use("Agg")  # non-interactive backend — must be set before pyplot import
 import matplotlib.pyplot as plt
@@ -28,7 +29,8 @@ def generate_chart(ticker: str) -> str | None:
     MAs, and save to a temp PNG.  Returns the file path, or None on failure.
     """
     try:
-        df = yf.download(ticker, period="1y", interval="1d", progress=False, auto_adjust=True)
+        # Fetch 18 months so the 200-day MA is fully warmed up before the 1-year window
+        df = yf.download(ticker, period="18mo", interval="1d", progress=False, auto_adjust=True)
     except Exception:
         return None
 
@@ -38,6 +40,12 @@ def generate_chart(ticker: str) -> str | None:
     close = df["Close"].squeeze()
     ma50  = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
+
+    # Trim display to last 1 year, but MAs are computed on full history
+    one_year_ago = close.index[-1] - pandas.DateOffset(years=1)
+    close = close[close.index >= one_year_ago]
+    ma50  = ma50[ma50.index >= one_year_ago]
+    ma200 = ma200[ma200.index >= one_year_ago]
 
     fig, ax = plt.subplots(figsize=(10, 4.5))
     fig.patch.set_facecolor(_BG)
