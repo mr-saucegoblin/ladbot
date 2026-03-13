@@ -32,12 +32,13 @@ from news_scanner import fetch_headlines
 from theme_detector import detect_themes
 from company_mapper import map_theme_to_companies
 from tweet_generator import generate_thread
+from chart_generator import generate_chart
 
 load_dotenv()
 
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 HOME_GUILD_ID = int(os.getenv("DISCORD_GUILD_ID"))
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+CLAUDE_MODEL = "claude-sonnet-4-6"
 MAX_HISTORY = 40  # messages to keep per channel before rolling off
 
 
@@ -238,6 +239,23 @@ async def _run_pipeline() -> tuple[list[str] | None, list[dict] | None, str | No
     return await asyncio.to_thread(_blocking)
 
 
+async def _send_posts_with_charts(channel: discord.abc.Messageable, posts: list[str], theme_picks: list[dict], prefix: str = "") -> None:
+    """Send posts and attach a stock chart after each theme post (posts[1:])."""
+    for i, post in enumerate(posts):
+        text = f"{prefix}\n{post}" if (i == 0 and prefix) else post
+        await _send_long(channel, text)
+        if i > 0:
+            idx = i - 1
+            if idx < len(theme_picks):
+                ticker = theme_picks[idx]["picks"][0]["ticker"]
+                chart_path = await asyncio.to_thread(generate_chart, ticker)
+                if chart_path:
+                    try:
+                        await channel.send(file=discord.File(chart_path))
+                    finally:
+                        os.remove(chart_path)
+
+
 async def _send_long(channel: discord.abc.Messageable, text: str, reply_to: discord.Message | None = None) -> None:
     """Send a message, splitting across multiple messages if over 2000 chars."""
     if len(text) <= 2000:
@@ -287,8 +305,7 @@ async def weekly_scan():
     await asyncio.to_thread(_save_weekly_picks, theme_picks)
     if recap:
         await channel.send(recap)
-    for i, post in enumerate(posts):
-        await channel.send(f"━━━━━━━━━━━━━━━━━━━━━━\n{post}" if i == 0 else post)
+    await _send_posts_with_charts(channel, posts, theme_picks, prefix="━━━━━━━━━━━━━━━━━━━━━━")
 
 
 @tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
@@ -401,15 +418,14 @@ async def scan(ctx: commands.Context):
     """Run the full pipeline and post this week's thematic picks."""
     await ctx.send("Running scan... this'll take a minute.")
 
-    posts, _theme_picks, error = await _run_pipeline()
+    posts, theme_picks, error = await _run_pipeline()
 
     if error:
         await ctx.send(f"Scan failed: {error}")
         return
 
     await ctx.send(f"Scan complete — posting {len(posts)} updates.")
-    for post in posts:
-        await ctx.send(post)
+    await _send_posts_with_charts(ctx.channel, posts, theme_picks)
 
 
 @bot.command(name="testscan")
@@ -423,14 +439,13 @@ async def testscan(ctx: commands.Context):
     await ctx.send(f"Running scan, results will post in <#{TEST_CHANNEL_ID}>...")
     recap = await asyncio.to_thread(_load_last_week_recap)
     await channel.send(await _scan_intro())
-    posts, _theme_picks, error = await _run_pipeline()
+    posts, theme_picks, error = await _run_pipeline()
     if error:
         await channel.send(f"Scan failed: {error}")
         return
     if recap:
         await channel.send(recap)
-    for i, post in enumerate(posts):
-        await channel.send(f"━━━━━━━━━━━━━━━━━━━━━━\n{post}" if i == 0 else post)
+    await _send_posts_with_charts(channel, posts, theme_picks, prefix="━━━━━━━━━━━━━━━━━━━━━━")
 
 
 @bot.command(name="testmorning")

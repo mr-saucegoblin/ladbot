@@ -1,6 +1,7 @@
 anthropic
 discord.py
 feedparser
+matplotlib
 openpyxl
 python-dotenv
 requests
