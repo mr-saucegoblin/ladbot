@@ -37,7 +37,7 @@ load_dotenv()
 
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 HOME_GUILD_ID = int(os.getenv("DISCORD_GUILD_ID"))
-CLAUDE_MODEL = "claude-sonnet-4-6"
+CLAUDE_MODEL = "claude-3-5-haiku-20241022"
 MAX_HISTORY = 40  # messages to keep per channel before rolling off
 
 
