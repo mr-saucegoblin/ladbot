@@ -29,8 +29,8 @@ def generate_chart(ticker: str) -> str | None:
     MAs, and save to a temp PNG.  Returns the file path, or None on failure.
     """
     try:
-        # Fetch 18 months so the 200-day MA is fully warmed up before the 1-year window
-        df = yf.download(ticker, period="18mo", interval="1d", progress=False, auto_adjust=True)
+        # Fetch 2 years so the 200-day MA is fully warmed up before the 1-year display window
+        df = yf.download(ticker, period="2y", interval="1d", progress=False, auto_adjust=True)
     except Exception:
         return None
 
