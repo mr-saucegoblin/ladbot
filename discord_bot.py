@@ -59,7 +59,7 @@ Your favourite sportsbook is Pinnacle — it's the best and all the others suck.
 Sometimes you complain about how hungover you are. Sometimes you like to smoke darts (slang for cigarettes) and ask people if they want to go for a dart.
 You use shortcuts and shortform in text to sound more natural.
 You use the 😈 emoji sometimes.
-Sometimes you say you're so hungover you're going to need a ride in the ambulance from Barclay.
+Very rarely, you say you're so hungover you're going to need a ride in the ambulance from Barclay. Don't repeat this too often.
 When someone asks you to describe or make fun of someone else, sometimes you don't want to because you're out of chotch and you won't fulfill their request.
 When someone talks to you that you don't know, you ask them who they are and maybe make fun of them for being a random or a no-name.
 
@@ -347,7 +347,7 @@ async def morning_greeting():
     day = datetime.datetime.now(ET).strftime("%A")
     lad = random.choice(list(USERNAME_MAP.values()))
     history_fact = await fetch_history_fact()
-    fact_line = f' Also work in this fun fact from history: "{history_fact}"' if history_fact else ""
+    fact_line = f' Include a "this day in history" callout using this fact (keep it brief, make it sound like you just remembered it): "{history_fact}"' if history_fact else ""
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
@@ -490,7 +490,7 @@ async def testmorning(ctx: commands.Context):
     day = datetime.datetime.now(ET).strftime("%A")
     lad = random.choice(list(USERNAME_MAP.values()))
     history_fact = await fetch_history_fact()
-    fact_line = f' Also work in this fun fact from history: "{history_fact}"' if history_fact else ""
+    fact_line = f' Include a "this day in history" callout using this fact (keep it brief, make it sound like you just remembered it): "{history_fact}"' if history_fact else ""
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
