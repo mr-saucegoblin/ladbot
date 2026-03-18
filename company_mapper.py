@@ -8,7 +8,7 @@ then validates with a live yfinance price fetch.
 import json
 import os
 import anthropic
-import yfinance as yf
+import requests
 from dotenv import load_dotenv
 from database import get_conn
 
@@ -73,41 +73,56 @@ def _market_cap_label(market_cap: int | None) -> str | None:
     return "Small Cap"
 
 
-def _fetch_price_data(ticker: str) -> dict | None:
-    """Fetch price, week return, and supplementary data from yfinance. Returns None if price unavailable."""
+FMP_BASE = "https://financialmodelingprep.com/stable"
+
+
+def _fmp_get(endpoint: str, params: dict) -> list | dict | None:
+    """Simple FMP GET helper."""
     try:
-        t = yf.Ticker(ticker)
-        hist = t.history(period="5d")
-        if hist.empty or len(hist) < 2:
-            return None
-        price = round(hist["Close"].iloc[-1], 2)
-        week_return = round((hist["Close"].iloc[-1] / hist["Close"].iloc[0] - 1) * 100, 1)
-
-        # Extra fields from info — all optional, fail gracefully
-        sector = None
-        try:
-            info = t.info
-            week_high = info.get("fiftyTwoWeekHigh")
-            week_low = info.get("fiftyTwoWeekLow")
-            vol = info.get("volume")
-            avg_vol = info.get("averageVolume")
-            volume_ratio = round(vol / avg_vol, 1) if vol and avg_vol else None
-            market_cap_label = _market_cap_label(info.get("marketCap"))
-            sector = info.get("sector")
-        except Exception:
-            week_high = week_low = volume_ratio = market_cap_label = None
-
-        return {
-            "price": price,
-            "week_return": week_return,
-            "week_high": week_high,
-            "week_low": week_low,
-            "volume_ratio": volume_ratio,
-            "market_cap_label": market_cap_label,
-            "sector": sector,
-        }
-    except Exception:
+        r = requests.get(
+            f"{FMP_BASE}/{endpoint}",
+            params={**params, "apikey": os.getenv("FMP_API_KEY")},
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"  FMP error [{endpoint}]: {e}")
         return None
+
+
+def _fetch_price_data(ticker: str) -> dict | None:
+    """Fetch price and supplementary data from FMP. Returns None if price unavailable."""
+    # Quote: price, volume, avgVolume, 52wk high/low, market cap, sector
+    quote_data = _fmp_get("quote", {"symbol": ticker})
+    if not quote_data or not isinstance(quote_data, list) or not quote_data[0].get("price"):
+        return None
+    q = quote_data[0]
+    price = round(q["price"], 2)
+
+    vol = q.get("volume")
+    avg_vol = q.get("avgVolume")
+    volume_ratio = round(vol / avg_vol, 1) if vol and avg_vol else None
+    market_cap_label = _market_cap_label(q.get("marketCap"))
+
+    # Week return: compare today's price to close 5 trading days ago
+    week_return = None
+    hist_data = _fmp_get("historical-price-eod/full", {"symbol": ticker, "limit": 6})
+    if hist_data and isinstance(hist_data, list) and len(hist_data) >= 2:
+        try:
+            week_return = round((hist_data[0]["close"] / hist_data[-1]["close"] - 1) * 100, 1)
+        except Exception:
+            pass
+
+    return {
+        "price": price,
+        "week_return": week_return,
+        "week_high": q.get("yearHigh"),
+        "week_low": q.get("yearLow"),
+        "volume_ratio": volume_ratio,
+        "market_cap_label": market_cap_label,
+        "sector": q.get("sector"),
+    }
 
 
 def map_theme_to_companies(theme: str, rationale: str, exclude_sectors: set[str] | None = None) -> list[dict]:

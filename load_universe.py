@@ -16,7 +16,7 @@ import os
 import time
 import anthropic
 import openpyxl
-import yfinance as yf
+import requests
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from database import init_db, get_conn
@@ -30,8 +30,9 @@ XLSX_FILES = {
 }
 
 TAGGING_BATCH_SIZE = 40    # companies per Claude call
-YFINANCE_DELAY = 0.3       # seconds between yfinance calls to avoid rate limits
+FMP_DELAY = 0.25           # seconds between FMP calls
 MODEL = "claude-sonnet-4-6"
+FMP_BASE = "https://financialmodelingprep.com/stable"
 
 
 # ── Ticker conversion ──────────────────────────────────────────────────────────
@@ -81,13 +82,15 @@ def load_bloomberg_files() -> dict[str, dict]:
     return companies
 
 
-# ── yfinance enrichment ────────────────────────────────────────────────────────
+# ── FMP enrichment ─────────────────────────────────────────────────────────────
 
-def enrich_with_yfinance(companies: dict[str, dict]) -> dict[str, dict]:
+def enrich_with_fmp(companies: dict[str, dict]) -> dict[str, dict]:
     """
-    Fetch sector, industry, and business summary for each ticker from yfinance.
+    Fetch sector, industry, and business description for each ticker from FMP.
     Skips tickers already in the DB (reuses cached data). Only fetches new ones.
     """
+    fmp_key = os.getenv("FMP_API_KEY")
+
     # Load cached data from DB
     try:
         with get_conn() as conn:
@@ -101,7 +104,7 @@ def enrich_with_yfinance(companies: dict[str, dict]) -> dict[str, dict]:
     to_fetch = [t for t in companies if t not in cached]
     reused = len(companies) - len(to_fetch)
     if reused:
-        print(f"  Reusing cached yfinance data for {reused} existing companies")
+        print(f"  Reusing cached data for {reused} existing companies")
         for ticker, data in companies.items():
             if ticker in cached:
                 data["sector"] = cached[ticker]["sector"] or ""
@@ -109,27 +112,34 @@ def enrich_with_yfinance(companies: dict[str, dict]) -> dict[str, dict]:
                 data["summary"] = cached[ticker]["summary"] or ""
 
     if not to_fetch:
-        print("  No new tickers to fetch from yfinance")
+        print("  No new tickers to fetch from FMP")
         return companies
 
-    print(f"  Fetching yfinance data for {len(to_fetch)} new tickers...")
+    print(f"  Fetching FMP profile data for {len(to_fetch)} new tickers...")
     for i, ticker in enumerate(to_fetch, 1):
         data = companies[ticker]
         try:
-            info = yf.Ticker(ticker).info
-            data["sector"] = info.get("sector", "")
-            data["industry"] = info.get("industry", "")
-            summary = info.get("longBusinessSummary", "")
-            data["summary"] = summary[:400] if summary else ""
+            r = requests.get(
+                f"{FMP_BASE}/profile",
+                params={"symbol": ticker, "apikey": fmp_key},
+                timeout=10,
+            )
+            r.raise_for_status()
+            result = r.json()
+            profile = result[0] if result and isinstance(result, list) else {}
+            data["sector"] = profile.get("sector", "")
+            data["industry"] = profile.get("industry", "")
+            description = profile.get("description", "")
+            data["summary"] = description[:400] if description else ""
         except Exception as e:
             data["sector"] = ""
             data["industry"] = ""
             data["summary"] = ""
-            print(f"  Warning: yfinance failed for {ticker} — {e}")
+            print(f"  Warning: FMP failed for {ticker} — {e}")
 
         if i % 50 == 0:
-            print(f"  yfinance enrichment: {i}/{len(to_fetch)}")
-        time.sleep(YFINANCE_DELAY)
+            print(f"  FMP enrichment: {i}/{len(to_fetch)}")
+        time.sleep(FMP_DELAY)
 
     return companies
 
@@ -277,8 +287,8 @@ def run():
     print("\nStep 2: Reading Bloomberg files...")
     companies = load_bloomberg_files()
 
-    print("\nStep 3: Enriching with yfinance (this takes a few minutes)...")
-    companies = enrich_with_yfinance(companies)
+    print("\nStep 3: Enriching with FMP profile data (this takes a few minutes)...")
+    companies = enrich_with_fmp(companies)
 
     print("\nStep 4: Tagging companies with Claude...")
     companies = tag_companies_with_claude(companies)

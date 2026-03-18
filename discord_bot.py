@@ -27,7 +27,6 @@ import requests
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
-import yfinance as yf
 from database import get_conn
 from news_scanner import fetch_headlines
 from theme_detector import detect_themes
@@ -198,10 +197,16 @@ def _load_last_week_recap() -> str | None:
             if not entry_price:
                 continue
             try:
-                hist = yf.Ticker(p["ticker"]).history(period="2d")
-                if hist.empty:
+                fmp_key = os.getenv("FMP_API_KEY")
+                r = requests.get(
+                    "https://financialmodelingprep.com/stable/quote",
+                    params={"symbol": p["ticker"], "apikey": fmp_key},
+                    timeout=10,
+                )
+                data = r.json()
+                if not data or not isinstance(data, list) or not data[0].get("price"):
                     continue
-                current = round(hist["Close"].iloc[-1], 2)
+                current = round(data[0]["price"], 2)
                 ret = round((current - entry_price) / entry_price * 100, 1)
                 sign = "+" if ret >= 0 else ""
                 lines.append(f"**{p['ticker']}** · {p['theme']} → {sign}{ret}%")

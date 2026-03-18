@@ -5,13 +5,14 @@ Returns the path to a temporary PNG file. Caller is responsible for cleanup.
 
 import os
 import tempfile
+import datetime
 
 import pandas
+import requests
 import matplotlib
 matplotlib.use("Agg")  # non-interactive backend — must be set before pyplot import
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import yfinance as yf
 
 
 _BG = "#1e2124"
@@ -30,14 +31,25 @@ def generate_chart(ticker: str) -> str | None:
     """
     try:
         # Fetch 2 years so the 200-day MA is fully warmed up before the 1-year display window
-        df = yf.download(ticker, period="2y", interval="1d", progress=False, auto_adjust=True)
+        from_date = (datetime.date.today() - datetime.timedelta(days=730)).isoformat()
+        r = requests.get(
+            "https://financialmodelingprep.com/stable/historical-price-eod/full",
+            params={"symbol": ticker, "from": from_date, "apikey": os.getenv("FMP_API_KEY")},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
     except Exception:
         return None
 
-    if df.empty or len(df) < 10:
+    if not data or not isinstance(data, list) or len(data) < 10:
         return None
 
-    close = df["Close"].squeeze()
+    df = pandas.DataFrame(data)[["date", "close"]].rename(columns={"close": "Close"})
+    df["date"] = pandas.to_datetime(df["date"])
+    df = df.set_index("date").sort_index()
+
+    close = df["Close"]
     ma50  = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
 
