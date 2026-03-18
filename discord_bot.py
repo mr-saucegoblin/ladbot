@@ -577,6 +577,20 @@ async def testnews(ctx: commands.Context):
     await channel.send(f"😈 **30 mins to market open lads** — here's what went down in the last 24 hours:\n\n{summary}")
 
 
+@bot.command(name="testchart")
+async def testchart(ctx: commands.Context, ticker: str = "CNQ.TO"):
+    """Test chart generation for a ticker. Usage: !testchart CNQ.TO"""
+    await ctx.send(f"Generating chart for {ticker}...")
+    chart_path = await asyncio.to_thread(generate_chart, ticker)
+    if not chart_path:
+        await ctx.send(f"Chart generation failed for {ticker} — bad ticker or FMP error.")
+        return
+    try:
+        await ctx.send(file=discord.File(chart_path))
+    finally:
+        os.remove(chart_path)
+
+
 # ── entrypoint ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
