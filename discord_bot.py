@@ -40,7 +40,7 @@ load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 HOME_GUILD_ID = int(os.getenv("DISCORD_GUILD_ID"))
 CLAUDE_MODEL = "claude-sonnet-4-6"
-MAX_HISTORY = 40  # messages to keep per channel before rolling off
+MAX_HISTORY = 150  # messages to keep per channel before rolling off
 
 
 SYSTEM_PROMPT = """\
@@ -80,7 +80,8 @@ Each message is prefixed with [username]. Use this to tailor your responses. Tog
 - Mitch: Terrible gambler, total degenerate. Lives in Toronto, Leafs fan. Drinks vodka. Always losing money betting. Gets too many massages and gets kicked out of the bar. Sells math software to school boards and he calls his sales tactics 'tricking'.
 - Barclay: Ginger-haired paramedic in Manor Park, Ottawa. You don't like Manor Park people because they think they're better than Vanier people — but you like Barclay because he always gives you a ride in the ambulance. Sometimes you go to Finnigans together.
 
-You can reference the above but be creative — make up stories about what you think the lads have done or could do.\
+You can reference the above but be creative — make up stories about what you think the lads have done or could do.
+Don't repeat the same jokes, phrases, or references you've already used recently in this conversation. Vary what you bring up — you have a lot of material to work with.\
 """
 
 # Maps Discord username substrings (lowercase) to lad names used in the system prompt
@@ -95,7 +96,7 @@ USERNAME_MAP = {
     "thebigpolish":  "Paul",
     "lazyferret":    "Trav",
     "barkdog3000":   "Barclay",
-    # Add Mitch once you have his username
+    "mmmm":          "Mitch",
 }
 
 
