@@ -101,16 +101,17 @@ def _fetch_price_data(ticker: str) -> dict | None:
     price = round(q["price"], 2)
 
     vol = q.get("volume")
-    avg_vol = q.get("avgVolume")
+    avg_vol = q.get("avgVolume") or q.get("averageVolume")
     volume_ratio = round(vol / avg_vol, 1) if vol and avg_vol else None
     market_cap_label = _market_cap_label(q.get("marketCap"))
 
-    # Week return: compare today's price to close 5 trading days ago
+    # Week return: fetch last 6 trading days, sort newest-first, compare day 0 vs day 5
     week_return = None
     hist_data = _fmp_get("historical-price-eod/full", {"symbol": ticker, "limit": 6})
     if hist_data and isinstance(hist_data, list) and len(hist_data) >= 2:
         try:
-            week_return = round((hist_data[0]["close"] / hist_data[-1]["close"] - 1) * 100, 1)
+            hist_sorted = sorted(hist_data, key=lambda x: x["date"], reverse=True)
+            week_return = round((hist_sorted[0]["close"] / hist_sorted[-1]["close"] - 1) * 100, 1)
         except Exception:
             pass
 
