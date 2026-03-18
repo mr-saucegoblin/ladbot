@@ -316,14 +316,21 @@ async def weekly_scan():
 
 
 async def fetch_history_fact() -> str:
-    """Fetch a 'this day in history' fact from numbersapi.com. Returns empty string on failure."""
+    """Fetch a 'this day in history' fact from Wikipedia. Returns empty string on failure."""
     now = datetime.datetime.now(ET)
-    url = f"http://numbersapi.com/{now.month}/{now.day}/date"
+    url = f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{now.month}/{now.day}"
     def _get():
         try:
-            r = requests.get(url, timeout=5)
-            return r.text.strip() if r.ok else ""
-        except Exception:
+            r = requests.get(url, timeout=5, headers={"User-Agent": "Ladbot/1.0"})
+            if not r.ok:
+                return ""
+            events = r.json().get("events", [])
+            if not events:
+                return ""
+            event = random.choice(events)
+            return f"On this day in {event['year']}, {event['text']}"
+        except Exception as e:
+            print(f"[history_fact] failed: {e}")
             return ""
     return await asyncio.to_thread(_get)
 
