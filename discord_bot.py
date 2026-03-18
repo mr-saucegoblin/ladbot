@@ -365,6 +365,51 @@ async def morning_greeting():
     await channel.send(response.content[0].text)
 
 
+async def _build_daily_news_summary() -> str | None:
+    """Fetch last 24h headlines and ask Claude to summarize the top 5. Returns formatted string or None on failure."""
+    def _blocking():
+        return fetch_headlines(lookback_hours=24)
+    headlines = await asyncio.to_thread(_blocking)
+    if not headlines:
+        return None
+
+    headlines_block = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines))
+    prompt = (
+        f"You are a financial news editor. Below are headlines from the past 24 hours.\n\n"
+        f"## Headlines\n{headlines_block}\n\n"
+        f"## Instructions\n"
+        f"Pick the 5 most significant stories for markets and investors today. "
+        f"For each, write one punchy sentence summarizing what happened and why it matters. "
+        f"Format as a numbered list. No fluff, no hedging. Be specific."
+    )
+
+    def _ask():
+        return claude.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+    response = await asyncio.to_thread(_ask)
+    return response.content[0].text.strip()
+
+
+@tasks.loop(time=datetime.time(hour=9, minute=15, tzinfo=ZoneInfo("America/Toronto")))
+async def daily_news():
+    """Post a 24h news summary at 9:15 AM ET every day except Friday."""
+    if datetime.datetime.now(ET).weekday() == 4:  # Friday has the weekly scan
+        return
+    channel_id = int(os.getenv("SCAN_CHANNEL_ID", 0))
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        return
+    summary = await _build_daily_news_summary()
+    if not summary:
+        await channel.send("Couldn't pull headlines this morning — feeds might be down.")
+        return
+    await channel.send(f"☕ **15 minutes to market open** — here's what happened in the last 24 hours:\n\n{summary}")
+
+
 # ── events ────────────────────────────────────────────────────────────────────
 
 @bot.event
@@ -378,6 +423,7 @@ async def on_ready():
         print(f"Copied {app_db} → {data_db}")
     weekly_scan.start()
     morning_greeting.start()
+    daily_news.start()
 
 
 @bot.event
@@ -506,6 +552,22 @@ async def testmorning(ctx: commands.Context):
         )
     response = await asyncio.to_thread(_ask)
     await channel.send(response.content[0].text)
+
+
+@bot.command(name="testnews")
+async def testnews(ctx: commands.Context):
+    """Test the daily news summary — always posts to the test channel."""
+    TEST_CHANNEL_ID = 891720029861732356
+    channel = bot.get_channel(TEST_CHANNEL_ID)
+    if not channel:
+        await ctx.send("Test channel not found.")
+        return
+    await ctx.send(f"Fetching 24h headlines, summary will post in <#{TEST_CHANNEL_ID}>...")
+    summary = await _build_daily_news_summary()
+    if not summary:
+        await channel.send("Couldn't pull headlines — feeds might be down.")
+        return
+    await channel.send(f"☕ **15 minutes to market open** — here's what happened in the last 24 hours:\n\n{summary}")
 
 
 # ── entrypoint ────────────────────────────────────────────────────────────────

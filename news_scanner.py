@@ -1,13 +1,17 @@
 """
-Fetches financial news headlines from Canadian and global RSS feeds.
+Fetches financial news headlines from Canadian and global RSS feeds,
+plus FMP General News API for broad macro/global coverage.
 Returns a deduplicated list of headline strings for theme analysis.
-No API key required.
 """
 
+import os
 import socket
 from datetime import datetime, timezone, timedelta
 import feedparser
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 socket.setdefaulttimeout(10)
 
@@ -61,16 +65,15 @@ NICHE_FEEDS = {
 LOOKBACK_DAYS = 7
 
 
-def _is_recent(entry) -> bool:
+def _is_recent(entry, cutoff: datetime) -> bool:
     published = entry.get("published_parsed")
     if not published:
         return True
     pub_dt = datetime(*published[:6], tzinfo=timezone.utc)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
     return pub_dt >= cutoff
 
 
-def _fetch_feed(source: str, url: str, seen: set, cap: int | None = None) -> list[str]:
+def _fetch_feed(source: str, url: str, seen: set, cutoff: datetime, cap: int | None = None) -> list[str]:
     """Fetch a single RSS feed and return new headlines not already in seen."""
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
@@ -80,7 +83,7 @@ def _fetch_feed(source: str, url: str, seen: set, cap: int | None = None) -> lis
         for entry in feed.entries:
             if cap and len(results) >= cap:
                 break
-            if not _is_recent(entry):
+            if not _is_recent(entry, cutoff):
                 continue
             title = entry.get("title", "").strip()
             if title and title not in seen:
@@ -93,22 +96,61 @@ def _fetch_feed(source: str, url: str, seen: set, cap: int | None = None) -> lis
         return []
 
 
-def fetch_headlines() -> list[str]:
+def _fetch_fmp_general_news(seen: set, cutoff: datetime) -> list[str]:
+    """Pull up to 250 general news headlines from FMP, filtered to cutoff."""
+    api_key = os.getenv("FMP_API_KEY")
+    if not api_key:
+        print("  Warning: FMP_API_KEY not set — skipping FMP general news")
+        return []
+    try:
+        response = requests.get(
+            "https://financialmodelingprep.com/stable/news/general-latest",
+            params={"limit": 250, "page": 0, "apikey": api_key},
+            timeout=15,
+        )
+        response.raise_for_status()
+        articles = response.json()
+        results = []
+        for article in articles:
+            pub_str = article.get("publishedDate", "")
+            if pub_str:
+                try:
+                    pub_dt = datetime.strptime(pub_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                    if pub_dt < cutoff:
+                        continue
+                except ValueError:
+                    pass
+            title = (article.get("title") or "").strip()
+            if title and title not in seen:
+                seen.add(title)
+                results.append(title)
+        print(f"  FMP General News: {len(results)} headlines")
+        return results
+    except Exception as e:
+        print(f"  Warning: FMP general news failed — {e}")
+        return []
+
+
+def fetch_headlines(lookback_hours: int = LOOKBACK_DAYS * 24) -> list[str]:
     """
-    Pulls headlines from all configured RSS feeds.
+    Pulls headlines from all configured RSS feeds plus FMP General News.
     Broad sources (Canadian + global macro) are uncapped.
     Niche sources (topic-specific) are capped at NICHE_CAP to prevent
     any single topic from dominating theme scores.
     Returns a deduplicated flat list of headline strings.
+    lookback_hours controls how far back to look (default: 7 days for weekly scan).
     """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     seen: set[str] = set()
     headlines: list[str] = []
 
     for source, url in BROAD_FEEDS.items():
-        headlines.extend(_fetch_feed(source, url, seen, cap=None))
+        headlines.extend(_fetch_feed(source, url, seen, cutoff, cap=None))
 
     for source, url in NICHE_FEEDS.items():
-        headlines.extend(_fetch_feed(source, url, seen, cap=NICHE_CAP))
+        headlines.extend(_fetch_feed(source, url, seen, cutoff, cap=NICHE_CAP))
+
+    headlines.extend(_fetch_fmp_general_news(seen, cutoff))
 
     print(f"\nFetched {len(headlines)} unique headlines total")
     return headlines
