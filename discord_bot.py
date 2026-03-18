@@ -577,7 +577,7 @@ async def testnews(ctx: commands.Context):
     await channel.send(f"😈 **30 mins to market open lads** — here's what went down in the last 24 hours:\n\n{summary}")
 
 
-@bot.command(name="testchart")
+@bot.command(name="chart")
 async def testchart(ctx: commands.Context, ticker: str = "CNQ.TO"):
     """Test chart generation for a ticker. Usage: !testchart CNQ.TO"""
     await ctx.send(f"Generating chart for {ticker}...")

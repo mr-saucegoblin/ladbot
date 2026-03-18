@@ -72,7 +72,7 @@ def generate_chart(ticker: str) -> str | None:
     ax.set_facecolor(_PANEL)
 
     # ── scanline overlay (subtle horizontal bands for retro CRT feel) ──────────
-    ylim_pad = (close.max() - close.min()) * 0.05
+    ylim_pad = (close.max() - close.min()) * 0.15
     y_bot = close.min() - ylim_pad
     y_top = close.max() + ylim_pad
     scanline_ys = numpy.linspace(y_bot, y_top, 120)
@@ -102,6 +102,7 @@ def generate_chart(ticker: str) -> str | None:
 
     # ── axes ───────────────────────────────────────────────────────────────────
     ax.set_ylim(y_bot, y_top)
+    ax.set_xlim(close.index[0], close.index[-1])
     ax.tick_params(colors=_TEXT, labelsize=8)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
