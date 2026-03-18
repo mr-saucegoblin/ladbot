@@ -72,7 +72,7 @@ def generate_chart(ticker: str) -> str | None:
     ax.set_facecolor(_PANEL)
 
     # ── scanline overlay (subtle horizontal bands for retro CRT feel) ──────────
-    ylim_pad = (close.max() - close.min()) * 0.15
+    ylim_pad = (close.max() - close.min()) * 0.05
     y_bot = close.min() - ylim_pad
     y_top = close.max() + ylim_pad
     scanline_ys = numpy.linspace(y_bot, y_top, 120)
