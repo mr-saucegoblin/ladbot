@@ -336,7 +336,7 @@ async def fetch_history_fact() -> str:
     return await asyncio.to_thread(_get)
 
 
-@tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
+@tasks.loop(time=datetime.time(hour=8, minute=30, tzinfo=ZoneInfo("America/Toronto")))
 async def morning_greeting():
     """Post a good morning message every day except Friday at 9 AM ET."""
     if datetime.datetime.now(ET).weekday() == 4:  # skip Friday — scan handles it
@@ -375,18 +375,19 @@ async def _build_daily_news_summary() -> str | None:
 
     headlines_block = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines))
     prompt = (
-        f"You are a financial news editor. Below are headlines from the past 24 hours.\n\n"
+        f"Here are today's headlines from the past 24 hours.\n\n"
         f"## Headlines\n{headlines_block}\n\n"
         f"## Instructions\n"
         f"Pick the 5 most significant stories for markets and investors today. "
-        f"For each, write one punchy sentence summarizing what happened and why it matters. "
-        f"Format as a numbered list. No fluff, no hedging. Be specific."
+        f"Write them as a numbered list. For each, give it a bold headline then one sentence in your own voice explaining what happened and why it matters to investors. "
+        f"Stay fully in character — keep it punchy and conversational like a text, but the content should be sharp and specific. No hashtags."
     )
 
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
             max_tokens=600,
+            system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
 
@@ -394,7 +395,7 @@ async def _build_daily_news_summary() -> str | None:
     return response.content[0].text.strip()
 
 
-@tasks.loop(time=datetime.time(hour=9, minute=15, tzinfo=ZoneInfo("America/Toronto")))
+@tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
 async def daily_news():
     """Post a 24h news summary at 9:15 AM ET every day except Friday."""
     if datetime.datetime.now(ET).weekday() == 4:  # Friday has the weekly scan
@@ -407,7 +408,7 @@ async def daily_news():
     if not summary:
         await channel.send("Couldn't pull headlines this morning — feeds might be down.")
         return
-    await channel.send(f"☕ **15 minutes to market open** — here's what happened in the last 24 hours:\n\n{summary}")
+    await channel.send(f"😈 **30 mins to market open lads** — here's what went down in the last 24 hours:\n\n{summary}")
 
 
 # ── events ────────────────────────────────────────────────────────────────────
@@ -567,7 +568,7 @@ async def testnews(ctx: commands.Context):
     if not summary:
         await channel.send("Couldn't pull headlines — feeds might be down.")
         return
-    await channel.send(f"☕ **15 minutes to market open** — here's what happened in the last 24 hours:\n\n{summary}")
+    await channel.send(f"😈 **30 mins to market open lads** — here's what went down in the last 24 hours:\n\n{summary}")
 
 
 # ── entrypoint ────────────────────────────────────────────────────────────────
