@@ -2,6 +2,7 @@ anthropic
 discord.py
 feedparser
 matplotlib
+numpy
 openpyxl
 psycopg2-binary
 python-dotenv
