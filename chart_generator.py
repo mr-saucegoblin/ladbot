@@ -67,7 +67,7 @@ def generate_chart(ticker: str) -> str | None:
     ma50  = ma50[ma50.index >= one_year_ago]
     ma200 = ma200[ma200.index >= one_year_ago]
 
-    fig, ax = plt.subplots(figsize=(10, 4.5))
+    fig, ax = plt.subplots(figsize=(10, 6))
     fig.patch.set_facecolor(_BG)
     ax.set_facecolor(_PANEL)
 
