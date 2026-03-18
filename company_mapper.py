@@ -44,10 +44,11 @@ def _build_mapping_prompt(theme: str, theme_rationale: str, companies: list[dict
 {companies_block}
 
 ## Instructions
-- Select the SINGLE best TSX company most directly exposed to this week's theme.
+- Select the SINGLE best TSX company that BENEFITS from this week's theme — rising revenues, expanding margins, or direct tailwinds.
+- Do NOT pick companies that are hurt by the theme (e.g. rate-sensitive stocks for a high-rates theme, importers for a tariff theme).
 - Base your selection on the thematic tags and industry — not just name recognition.
 - Prefer pure-play exposure over diversified conglomerates.
-- Write one sentence explaining why this company is the best play for this theme right now.
+- Write one sentence explaining why this company stands to gain from this theme right now.
 
 Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.
 
