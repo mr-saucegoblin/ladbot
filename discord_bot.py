@@ -23,6 +23,7 @@ import time
 from zoneinfo import ZoneInfo
 import anthropic
 import discord
+import requests
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
@@ -314,6 +315,19 @@ async def weekly_scan():
     await _send_posts_with_charts(channel, posts, theme_picks)
 
 
+async def fetch_history_fact() -> str:
+    """Fetch a 'this day in history' fact from numbersapi.com. Returns empty string on failure."""
+    now = datetime.datetime.now(ET)
+    url = f"http://numbersapi.com/{now.month}/{now.day}/date"
+    def _get():
+        try:
+            r = requests.get(url, timeout=5)
+            return r.text.strip() if r.ok else ""
+        except Exception:
+            return ""
+    return await asyncio.to_thread(_get)
+
+
 @tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
 async def morning_greeting():
     """Post a good morning message every day except Friday at 9 AM ET."""
@@ -325,15 +339,18 @@ async def morning_greeting():
         return
     day = datetime.datetime.now(ET).strftime("%A")
     lad = random.choice(list(USERNAME_MAP.values()))
+    history_fact = await fetch_history_fact()
+    fact_line = f' Also work in this fun fact from history: "{history_fact}"' if history_fact else ""
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=150,
+            max_tokens=200,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": (
-                f"It's {day} morning. Write a short good morning message to the lads (2-3 sentences max). "
+                f"It's {day} morning. Write a short good morning message to the lads (3-4 sentences max). "
                 f"Make sure to reference {lad} specifically. "
-                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, Wednesday hump day, etc). No hashtags."
+                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, Wednesday hump day, etc). "
+                f"No hashtags.{fact_line}"
             )}],
         )
     response = await asyncio.to_thread(_ask)
@@ -465,15 +482,18 @@ async def testmorning(ctx: commands.Context):
     await ctx.send(f"Morning greeting will post in <#{TEST_CHANNEL_ID}>...")
     day = datetime.datetime.now(ET).strftime("%A")
     lad = random.choice(list(USERNAME_MAP.values()))
+    history_fact = await fetch_history_fact()
+    fact_line = f' Also work in this fun fact from history: "{history_fact}"' if history_fact else ""
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=150,
+            max_tokens=200,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": (
-                f"It's {day} morning. Write a short good morning message to the lads (2-3 sentences max). "
+                f"It's {day} morning. Write a short good morning message to the lads (3-4 sentences max). "
                 f"Make sure to reference {lad} specifically. "
-                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, Wednesday hump day, etc). No hashtags."
+                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, Wednesday hump day, etc). "
+                f"No hashtags.{fact_line}"
             )}],
         )
     response = await asyncio.to_thread(_ask)
