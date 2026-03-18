@@ -379,8 +379,8 @@ async def _build_daily_news_summary() -> str | None:
         f"## Headlines\n{headlines_block}\n\n"
         f"## Instructions\n"
         f"Pick the 5 most significant stories for markets and investors today. "
-        f"Write them as a numbered list. For each, give it a bold headline then one sentence in your own voice explaining what happened and why it matters to investors. "
-        f"Stay fully in character — keep it punchy and conversational like a text, but the content should be sharp and specific. No hashtags. "
+        f"Write them as a compact numbered list — each item on a single line in this exact format: [number]. [emoji] **[bold headline]** — [one sentence explanation]. "
+        f"No blank lines between items. Stay fully in character — punchy and conversational, but sharp and specific. No hashtags. "
         f"This is purely a news recap — do NOT recommend stocks, mention tickers, or give investment opinions."
     )
 
