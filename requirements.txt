@@ -3,6 +3,7 @@ discord.py
 feedparser
 matplotlib
 numpy
+pandas
 openpyxl
 psycopg2-binary
 python-dotenv
