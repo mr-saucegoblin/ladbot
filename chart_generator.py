@@ -103,7 +103,7 @@ def generate_chart(ticker: str) -> str | None:
     # ── axes ───────────────────────────────────────────────────────────────────
     ax.set_ylim(y_bot, y_top)
     ax.set_xlim(close.index[0], close.index[-1])
-    ax.tick_params(colors=_TEXT, labelsize=8)
+    ax.tick_params(colors=_TEXT, labelsize=10)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     plt.setp(ax.get_xticklabels(), rotation=0, ha="center")
