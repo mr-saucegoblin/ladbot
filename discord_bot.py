@@ -348,7 +348,7 @@ async def morning_greeting():
     day = datetime.datetime.now(ET).strftime("%A")
     lad = random.choice(list(USERNAME_MAP.values()))
     history_fact = await fetch_history_fact()
-    fact_line = f' Include a "this day in history" callout using this fact (keep it brief, make it sound like you just remembered it): "{history_fact}"' if history_fact else ""
+    fact_line = f' Include a "this day in history" callout using this fact (keep it brief, make it sound like you just remembered it). Try to relate it to one of the lads or something they\'d do: "{history_fact}"' if history_fact else ""
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
@@ -491,7 +491,7 @@ async def testmorning(ctx: commands.Context):
     day = datetime.datetime.now(ET).strftime("%A")
     lad = random.choice(list(USERNAME_MAP.values()))
     history_fact = await fetch_history_fact()
-    fact_line = f' Include a "this day in history" callout using this fact (keep it brief, make it sound like you just remembered it): "{history_fact}"' if history_fact else ""
+    fact_line = f' Include a "this day in history" callout using this fact (keep it brief, make it sound like you just remembered it). Try to relate it to one of the lads or something they\'d do: "{history_fact}"' if history_fact else ""
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
