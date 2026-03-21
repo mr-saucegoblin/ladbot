@@ -368,13 +368,14 @@ async def morning_greeting():
     await channel.send(response.content[0].text)
 
 
-async def _build_daily_news_summary() -> str | None:
-    """Fetch last 24h headlines and ask Claude to summarize the top 5. Returns formatted string or None on failure."""
+async def _build_daily_news_summary() -> tuple[str, int] | None:
+    """Fetch last 24h headlines and ask Claude to summarize the top 5. Returns (summary, article_count) or None on failure."""
     def _blocking():
         return fetch_headlines(lookback_hours=24)
     headlines = await asyncio.to_thread(_blocking)
     if not headlines:
         return None
+    article_count = len(headlines)
 
     headlines_block = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines))
     prompt = (
@@ -396,7 +397,7 @@ async def _build_daily_news_summary() -> str | None:
         )
 
     response = await asyncio.to_thread(_ask)
-    return response.content[0].text.strip()
+    return response.content[0].text.strip(), article_count
 
 
 @tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
@@ -408,11 +409,17 @@ async def daily_news():
     channel = bot.get_channel(channel_id)
     if not channel:
         return
-    summary = await _build_daily_news_summary()
-    if not summary:
+    result = await _build_daily_news_summary()
+    if not result:
         await channel.send("Couldn't pull headlines this morning — feeds might be down.")
         return
-    await channel.send(f"😈 **30 mins to market open lads** — here's what went down in the last 24 hours:\n\n{summary}")
+    summary, article_count = result
+    weekday = datetime.datetime.now(ET).weekday()
+    if weekday >= 5:  # Saturday or Sunday
+        intro = f"😈 **Markets are closed lads** — scanned {article_count} articles, here's what went down in the last 24 hours:"
+    else:
+        intro = f"😈 **30 mins to market open lads** — scanned {article_count} articles, here's what went down in the last 24 hours:"
+    await channel.send(f"{intro}\n\n{summary}")
 
 
 # ── events ────────────────────────────────────────────────────────────────────
@@ -568,11 +575,12 @@ async def testnews(ctx: commands.Context):
         await ctx.send("Test channel not found.")
         return
     await ctx.send(f"Fetching 24h headlines, summary will post in <#{TEST_CHANNEL_ID}>...")
-    summary = await _build_daily_news_summary()
-    if not summary:
+    result = await _build_daily_news_summary()
+    if not result:
         await channel.send("Couldn't pull headlines — feeds might be down.")
         return
-    await channel.send(f"😈 **30 mins to market open lads** — here's what went down in the last 24 hours:\n\n{summary}")
+    summary, article_count = result
+    await channel.send(f"😈 **30 mins to market open lads** — scanned {article_count} articles, here's what went down in the last 24 hours:\n\n{summary}")
 
 
 @bot.command(name="chart")
