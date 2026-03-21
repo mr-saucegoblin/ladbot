@@ -101,7 +101,10 @@ Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.
       "reason": "<one sentence>"
     }}
   ]
-}}
+}}"""
+
+
+def _market_cap_label(market_cap: int | None) -> str | None:
     if not market_cap:
         return None
     if market_cap >= 10_000_000_000:
