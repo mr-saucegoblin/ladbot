@@ -27,12 +27,12 @@ def _fetch_all_companies() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def _build_mapping_prompt(theme: str, theme_rationale: str, companies: list[dict]) -> str:
+def _build_shortlist_prompt(theme: str, theme_rationale: str, companies: list[dict]) -> str:
     companies_block = "\n".join(
         f"{i+1}. {c['ticker']} | {c['name']} | {c['industry']} | tags: {c['tags']}"
         for i, c in enumerate(companies)
     )
-    return f"""You are a Canadian equity market analyst selecting TSX stock picks for a thematic investing report.
+    return f"""You are a Canadian equity market analyst screening TSX stocks for thematic exposure.
 
 ## This Week's Top Theme
 {theme}
@@ -44,11 +44,52 @@ def _build_mapping_prompt(theme: str, theme_rationale: str, companies: list[dict
 {companies_block}
 
 ## Instructions
-- Select the SINGLE best TSX company that BENEFITS from this week's theme — rising revenues, expanding margins, or direct tailwinds.
-- Do NOT pick companies that are hurt by the theme (e.g. rate-sensitive stocks for a high-rates theme, importers for a tariff theme).
-- Base your selection on the thematic tags and industry — not just name recognition.
+- Return the top 10 TSX companies most likely to BENEFIT from this theme.
+- Do NOT include companies hurt by the theme.
+- Use the thematic tags and industry to guide your selection.
+- Return ONLY tickers — no explanation needed at this stage.
+
+Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.
+
+{{
+  "candidates": ["TICKER1.TO", "TICKER2.TO", ...]
+}}"""
+
+
+def _fetch_candidates_with_descriptions(tickers: list[str]) -> list[dict]:
+    """Fetch full company details including summary for a shortlist of tickers."""
+    placeholders = ",".join("?" * len(tickers))
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT ticker, name, sector, industry, tags, summary FROM companies WHERE ticker IN ({placeholders})",
+            tickers,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _build_final_pick_prompt(theme: str, theme_rationale: str, candidates: list[dict]) -> str:
+    companies_block = "\n".join(
+        f"{i+1}. {c['ticker']} | {c['name']} | {c['industry']}\n"
+        f"   {c['summary'] or 'No description available.'}"
+        for i, c in enumerate(candidates)
+    )
+    return f"""You are a Canadian equity market analyst selecting the single best TSX stock pick for a thematic investing report.
+
+## This Week's Top Theme
+{theme}
+
+## Why This Theme Is Trending
+{theme_rationale}
+
+## Shortlisted Candidates (ticker | name | industry | description)
+{companies_block}
+
+## Instructions
+- Select the SINGLE best company that stands to benefit most from this theme.
+- Read each company's description carefully — pick the one with the most direct, material exposure.
+- Do NOT pick companies hurt by the theme.
 - Prefer pure-play exposure over diversified conglomerates.
-- Write one sentence explaining why this company stands to gain from this theme right now.
+- Write one sentence explaining exactly why this company benefits from this theme right now.
 
 Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.
 
@@ -60,10 +101,7 @@ Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.
       "reason": "<one sentence>"
     }}
   ]
-}}"""
-
-
-def _market_cap_label(market_cap: int | None) -> str | None:
+}}
     if not market_cap:
         return None
     if market_cap >= 10_000_000_000:
@@ -143,17 +181,39 @@ def map_theme_to_companies(theme: str, rationale: str, exclude_sectors: set[str]
 
     print(f"Matching theme '{theme}' against {len(all_companies)} companies...")
 
-    message = client.messages.create(
+    # Stage 1: shortlist top 10 candidates using tags
+    stage1 = client.messages.create(
         model=MODEL,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": _build_mapping_prompt(theme, rationale, all_companies)}],
+        max_tokens=256,
+        messages=[{"role": "user", "content": _build_shortlist_prompt(theme, rationale, all_companies)}],
     )
-
     try:
-        data = json.loads(message.content[0].text.strip())
+        shortlist_data = json.loads(stage1.content[0].text.strip())
     except Exception:
         import re
-        match = re.search(r"\{.*\}", message.content[0].text, re.DOTALL)
+        match = re.search(r"\{.*\}", stage1.content[0].text, re.DOTALL)
+        shortlist_data = json.loads(match.group()) if match else {"candidates": []}
+    candidate_tickers = shortlist_data.get("candidates", [])
+
+    if not candidate_tickers:
+        return []
+
+    # Stage 2: pick the best one using full descriptions
+    candidates = _fetch_candidates_with_descriptions(candidate_tickers)
+    if not candidates:
+        return []
+
+    print(f"  Shortlisted {len(candidates)} candidates — selecting best with descriptions...")
+    stage2 = client.messages.create(
+        model=MODEL,
+        max_tokens=512,
+        messages=[{"role": "user", "content": _build_final_pick_prompt(theme, rationale, candidates)}],
+    )
+    try:
+        data = json.loads(stage2.content[0].text.strip())
+    except Exception:
+        import re
+        match = re.search(r"\{.*\}", stage2.content[0].text, re.DOTALL)
         data = json.loads(match.group()) if match else {"picks": []}
 
     picks = data.get("picks", [])
