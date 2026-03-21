@@ -582,7 +582,12 @@ async def testnews(ctx: commands.Context):
         await channel.send("Couldn't pull headlines — feeds might be down.")
         return
     summary, article_count = result
-    await channel.send(f"😈 **30 mins to market open lads** — scanned {article_count} articles, here's what went down in the last 24 hours:\n\n{summary}")
+    weekday = datetime.datetime.now(ET).weekday()
+    if weekday >= 5:
+        intro = f"😈 **Markets are closed lads** — scanned {article_count} articles, here's what went down in the last 24 hours:"
+    else:
+        intro = f"😈 **30 mins to market open lads** — scanned {article_count} articles, here's what went down in the last 24 hours:"
+    await channel.send(f"{intro}\n\n{summary}")
 
 
 @bot.command(name="chart")
