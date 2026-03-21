@@ -203,7 +203,7 @@ def map_theme_to_companies(theme: str, rationale: str, exclude_sectors: set[str]
     if not candidates:
         return []
 
-    print(f"  Shortlisted {len(candidates)} candidates — selecting best with descriptions...")
+    print(f"  Shortlisted {len(candidates)} candidates - selecting best with descriptions...")
     stage2 = client.messages.create(
         model=MODEL,
         max_tokens=512,
