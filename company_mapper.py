@@ -167,11 +167,12 @@ def _fetch_price_data(ticker: str) -> dict | None:
     }
 
 
-def map_theme_to_companies(theme: str, rationale: str, exclude_sectors: set[str] | None = None) -> list[dict]:
+def map_theme_to_companies(theme: str, rationale: str, exclude_sectors: set[str] | None = None, exclude_tickers: set[str] | None = None) -> list[dict]:
     """
     Given a theme label and rationale, returns top TSX company picks
     with live prices. Each dict has: ticker, name, reason, price.
     exclude_sectors: sector strings already used by prior picks - filtered out before Claude sees the list.
+    exclude_tickers: specific tickers already picked - filtered out before Claude sees the list.
     """
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     all_companies = _fetch_all_companies()
@@ -181,6 +182,8 @@ def map_theme_to_companies(theme: str, rationale: str, exclude_sectors: set[str]
 
     if exclude_sectors:
         all_companies = [c for c in all_companies if c.get("sector") not in exclude_sectors]
+    if exclude_tickers:
+        all_companies = [c for c in all_companies if c["ticker"] not in exclude_tickers]
 
     print(f"Matching theme '{theme}' against {len(all_companies)} companies...")
 
