@@ -110,7 +110,7 @@ def _fetch_price_data(ticker: str) -> dict | None:
     hist_data = _fmp_get("historical-price-eod/full", {"symbol": ticker, "limit": 6})
     if hist_data and isinstance(hist_data, list) and len(hist_data) >= 2:
         try:
-            hist_sorted = sorted(hist_data, key=lambda x: x["date"], reverse=True)
+            hist_sorted = sorted(hist_data, key=lambda x: x["date"], reverse=True)[:6]
             week_return = round((hist_sorted[0]["close"] / hist_sorted[-1]["close"] - 1) * 100, 1)
         except Exception:
             pass
