@@ -343,9 +343,7 @@ async def fetch_history_fact() -> str:
 
 @tasks.loop(time=datetime.time(hour=8, minute=30, tzinfo=ZoneInfo("America/Toronto")))
 async def morning_greeting():
-    """Post a good morning message every day except Friday at 9 AM ET."""
-    if datetime.datetime.now(ET).weekday() == 4:  # skip Friday — scan handles it
-        return
+    """Post a good morning message every weekday at 9 AM ET."""
     channel_id = int(os.getenv("SCAN_CHANNEL_ID", 0))
     channel = bot.get_channel(channel_id)
     if not channel:
