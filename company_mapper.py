@@ -168,7 +168,7 @@ def map_theme_to_companies(theme: str, rationale: str, exclude_sectors: set[str]
     """
     Given a theme label and rationale, returns top TSX company picks
     with live prices. Each dict has: ticker, name, reason, price.
-    exclude_sectors: sector strings already used by prior picks — filtered out before Claude sees the list.
+    exclude_sectors: sector strings already used by prior picks - filtered out before Claude sees the list.
     """
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     all_companies = _fetch_all_companies()
