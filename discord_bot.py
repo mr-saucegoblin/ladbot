@@ -353,11 +353,11 @@ async def morning_greeting():
     day = datetime.datetime.now(ET).strftime("%A")
     lad = random.choice(list(USERNAME_MAP.values()))
     history_fact = await fetch_history_fact()
-    fact_line = f' Include a "this day in history" callout using this fact (keep it brief, make it sound like you just remembered it). Try to relate it to one of the lads or something they\'d do: "{history_fact}"' if history_fact else ""
+    fact_line = f' Include a "this day in history" callout using this fact - give it a proper sentence or two, make it sound like you just remembered it, and relate it to one of the lads or something they\'d do: "{history_fact}"' if history_fact else ""
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=200,
+            max_tokens=350,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": (
                 f"It's {day} morning. Write a short good morning message to the lads (3-4 sentences max). "
@@ -551,11 +551,11 @@ async def testmorning(ctx: commands.Context):
     day = datetime.datetime.now(ET).strftime("%A")
     lad = random.choice(list(USERNAME_MAP.values()))
     history_fact = await fetch_history_fact()
-    fact_line = f' Include a "this day in history" callout using this fact (keep it brief, make it sound like you just remembered it). Try to relate it to one of the lads or something they\'d do: "{history_fact}"' if history_fact else ""
+    fact_line = f' Include a "this day in history" callout using this fact - give it a proper sentence or two, make it sound like you just remembered it, and relate it to one of the lads or something they\'d do: "{history_fact}"' if history_fact else ""
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=200,
+            max_tokens=350,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": (
                 f"It's {day} morning. Write a short good morning message to the lads (3-4 sentences max). "
