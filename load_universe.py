@@ -2,15 +2,15 @@
 One-time setup script. Run this before the weekly bot.
 
 Steps:
-  1. Read both Bloomberg xlsx files from Stock Universe/
-  2. Deduplicate and convert tickers to yfinance format
-  3. Enrich each company with yfinance sector/industry/summary
-  4. Batch-send to Claude for thematic tagging
-  5. Store everything in SQLite
+  1. Read tickers from fmp_covered.txt (default) or Bloomberg xlsx files (--bloomberg)
+  2. Enrich each company with FMP sector/industry/description
+  3. Batch-send to Claude for thematic tagging
+  4. Store everything in SQLite
 
 Re-run any time you want to refresh the universe (e.g. new index constituents).
 """
 
+import argparse
 import json
 import os
 import time
@@ -127,6 +127,8 @@ def enrich_with_fmp(companies: dict[str, dict]) -> dict[str, dict]:
             r.raise_for_status()
             result = r.json()
             profile = result[0] if result and isinstance(result, list) else {}
+            if profile.get("companyName"):
+                data["name"] = profile["companyName"]
             data["sector"] = profile.get("sector", "")
             data["industry"] = profile.get("industry", "")
             description = profile.get("description", "")
@@ -276,16 +278,32 @@ def save_to_db(companies: dict[str, dict]):
     print(f"  Saved {len(rows)} companies to database")
 
 
+# ── FMP covered ticker loader ──────────────────────────────────────────────────
+
+def load_fmp_covered() -> dict[str, dict]:
+    """Load tickers from fmp_covered.txt. Name/sector/industry filled in by FMP profile step."""
+    path = os.path.join(os.path.dirname(__file__), "fmp_covered.txt")
+    with open(path) as f:
+        tickers = [line.strip() for line in f if line.strip()]
+    companies = {t: {"ticker": t, "bloomberg_ticker": "", "name": t, "price": None, "source": "fmp"} for t in tickers}
+    print(f"  Loaded {len(companies)} tickers from fmp_covered.txt")
+    return companies
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
-def run():
+def run(use_bloomberg: bool = False):
     print("=== Ladbot TSX — Universe Loader ===\n")
 
     print("Step 1: Initialising database...")
     init_db()
 
-    print("\nStep 2: Reading Bloomberg files...")
-    companies = load_bloomberg_files()
+    if use_bloomberg:
+        print("\nStep 2: Reading Bloomberg files...")
+        companies = load_bloomberg_files()
+    else:
+        print("\nStep 2: Reading FMP covered tickers...")
+        companies = load_fmp_covered()
 
     print("\nStep 3: Enriching with FMP profile data (this takes a few minutes)...")
     companies = enrich_with_fmp(companies)
@@ -303,4 +321,7 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--bloomberg", action="store_true", help="Use Bloomberg xlsx files instead of fmp_covered.txt")
+    args = parser.parse_args()
+    run(use_bloomberg=args.bloomberg)
