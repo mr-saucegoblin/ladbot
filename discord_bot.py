@@ -333,15 +333,16 @@ async def _build_hockey_recap(stats, delta, old_snap) -> str:
         f"Standings changes:\n{movers_str}\n\n"
         f"Current standings:\n{standings_str}\n\n"
         "Write a morning fantasy hockey recap for the lads' group chat. "
-        "Call out anyone who got passed in the standings by name — mock them. "
-        "Hype up whoever scored big. Reference the actual game results. "
-        "Keep it punchy, 4-6 sentences max. Use bold for names. Stay fully in character. No hashtags."
+        "Call out anyone who got passed in the standings by name — mock them hard. "
+        "Hype up whoever scored big and name their specific players. Reference the actual game results and scores. "
+        "If any goalies got wins or shutouts, mention it. "
+        "8-10 sentences, punchy. Use bold for names. Stay fully in character. No hashtags."
     )
 
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=400,
+            max_tokens=600,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
