@@ -1,6 +1,8 @@
 anthropic
 discord.py
 feedparser
+gspread
+google-auth
 matplotlib
 numpy
 pandas

@@ -33,6 +33,7 @@ from theme_detector import detect_themes
 from company_mapper import map_theme_to_companies
 from tweet_generator import generate_thread
 from chart_generator import generate_chart
+import hockey_scraper
 
 load_dotenv()
 
@@ -301,6 +302,39 @@ async def _send_long(channel: discord.abc.Messageable, text: str, reply_to: disc
 
 ET = ZoneInfo("America/Toronto")
 
+@tasks.loop(time=datetime.time(hour=9, minute=30, tzinfo=ZoneInfo("America/Toronto")))
+async def hockey_morning_recap():
+    """Post playoff fantasy hockey recap daily at 9:30 AM ET (April–June)."""
+    now = datetime.datetime.now(ET)
+    if now.month not in (4, 5, 6):
+        return
+    channel_id = int(os.getenv("SCAN_CHANNEL_ID", 0))
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        return
+    try:
+        stats, delta = await asyncio.to_thread(hockey_scraper.morning_recap)
+        msg = hockey_scraper.build_discord_recap(stats, delta)
+        await _send_long(channel, msg)
+    except Exception as e:
+        print(f"[hockey_morning_recap] failed: {e}")
+
+
+@tasks.loop(minutes=10)
+async def hockey_live_update():
+    """Update Google Sheet with live playoff stats every 10 min during game hours."""
+    now = datetime.datetime.now(ET)
+    if now.month not in (4, 5, 6):
+        return
+    # Run 6 PM – 1 AM ET (typical playoff game window)
+    if not (18 <= now.hour <= 23 or now.hour == 0):
+        return
+    try:
+        await asyncio.to_thread(hockey_scraper.update_sheet_only)
+    except Exception as e:
+        print(f"[hockey_live_update] failed: {e}")
+
+
 @tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
 async def weekly_scan():
     """Auto-post Friday picks at 9 AM ET."""
@@ -439,6 +473,8 @@ async def on_ready():
     weekly_scan.start()
     morning_greeting.start()
     daily_news.start()
+    hockey_morning_recap.start()
+    hockey_live_update.start()
 
 
 @bot.event
@@ -603,6 +639,23 @@ async def testchart(ctx: commands.Context, ticker: str = "CNQ.TO"):
         await ctx.send(file=discord.File(chart_path))
     finally:
         os.remove(chart_path)
+
+
+@bot.command(name="testhockey")
+async def testhockey(ctx: commands.Context):
+    """Test the hockey morning recap — posts to test channel."""
+    TEST_CHANNEL_ID = 891720029861732356
+    channel = bot.get_channel(TEST_CHANNEL_ID)
+    if not channel:
+        await ctx.send("Test channel not found.")
+        return
+    await ctx.send(f"Fetching hockey stats, will post in <#{TEST_CHANNEL_ID}>...")
+    try:
+        stats, delta = await asyncio.to_thread(hockey_scraper.morning_recap)
+        msg = hockey_scraper.build_discord_recap(stats, delta)
+        await _send_long(channel, msg)
+    except Exception as e:
+        await channel.send(f"Hockey recap failed: {e}")
 
 
 # ── entrypoint ────────────────────────────────────────────────────────────────
