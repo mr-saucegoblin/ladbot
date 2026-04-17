@@ -528,6 +528,7 @@ async def on_ready():
     daily_news.start()
     hockey_morning_recap.start()
     hockey_live_update.start()
+    hockey_season_opener.start()
 
 
 @bot.event
@@ -692,6 +693,68 @@ async def testchart(ctx: commands.Context, ticker: str = "CNQ.TO"):
         await ctx.send(file=discord.File(chart_path))
     finally:
         os.remove(chart_path)
+
+
+_PLAYOFF_MATCHUPS = """
+Western Conference R1:
+- Colorado Avalanche vs Los Angeles Kings
+- Dallas Stars vs Minnesota Wild
+- Vegas Golden Knights vs Utah Hockey Club
+- Edmonton Oilers vs Anaheim Ducks
+
+Eastern Conference R1:
+- Buffalo Sabres vs Boston Bruins
+- Tampa Bay Lightning vs Montreal Canadiens
+- Carolina Hurricanes vs Ottawa Senators
+- Pittsburgh Penguins vs Philadelphia Flyers
+"""
+
+async def _generate_hockey_opener(channel):
+    teams_str = "\n".join(
+        f"- {name} (GM: {r['gm']}, goalies: {r['goalie_team']})"
+        for name, r in hockey_scraper.ROSTERS.items()
+    )
+    prompt = (
+        "It's the start of the 2026 NHL playoffs and the lads are running a fantasy hockey pool. "
+        "Write a big hype opening message welcoming everyone to the league. "
+        f"Here are the 11 fantasy teams:\n{teams_str}\n\n"
+        f"Here are the actual NHL playoff matchups:\n{_PLAYOFF_MATCHUPS}\n"
+        "Call out each GM by name. Make fun of some of their picks — especially the bad ones. "
+        "Hype up the ones with stacked rosters. Make bold predictions about who wins the pool and who finishes last. "
+        "Comment on some of the NHL matchups and how they affect the fantasy teams. "
+        "This should be long — 12-15 sentences. Go full Ladbot, stay in character. No hashtags. "
+        "Use Discord bold formatting for names."
+    )
+
+    def _ask():
+        return claude.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=1200,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+    response = await asyncio.to_thread(_ask)
+    await _send_long(channel, response.content[0].text)
+
+
+@tasks.loop(time=datetime.time(hour=10, minute=0, tzinfo=ZoneInfo("America/Toronto")))
+async def hockey_season_opener():
+    """Post the playoff season opener message once on April 18 2026 at 10 AM ET."""
+    now = datetime.datetime.now(ET)
+    if not (now.year == 2026 and now.month == 4 and now.day == 18):
+        return
+    channel_id = int(os.getenv("SCAN_CHANNEL_ID", 0))
+    channel = bot.get_channel(channel_id)
+    if channel:
+        await _generate_hockey_opener(channel)
+    hockey_season_opener.stop()
+
+
+@bot.command(name="hockeystart")
+async def hockeystart(ctx: commands.Context):
+    """Manually trigger the playoff season opener message (for testing)."""
+    await _generate_hockey_opener(ctx.channel)
 
 
 @bot.command(name="testhockey")
