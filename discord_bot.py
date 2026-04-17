@@ -374,8 +374,8 @@ async def hockey_live_update():
     now = datetime.datetime.now(ET)
     if now.month not in (4, 5, 6):
         return
-    # Run 6 PM – 1 AM ET (typical playoff game window)
-    if not (18 <= now.hour <= 23 or now.hour == 0):
+    # Run 12 PM – 2 AM ET (covers afternoon and evening playoff games)
+    if not (12 <= now.hour <= 23 or now.hour in (0, 1)):
         return
     try:
         await asyncio.to_thread(hockey_scraper.update_sheet_only)
