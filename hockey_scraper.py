@@ -157,17 +157,22 @@ GOALIE_TO_FANTASY = {r["goalie_team"]: name for name, r in ROSTERS.items()}
 
 # ── NHL API helpers ───────────────────────────────────────────────────────────
 
-def _get(url, params=None, retries=3):
+def _get(url, params=None, retries=4):
     for i in range(retries):
         try:
             r = requests.get(url, params=params, timeout=15)
+            if r.status_code == 429:
+                wait = int(r.headers.get("Retry-After", 10))
+                logger.warning(f"Rate limited, sleeping {wait}s...")
+                time.sleep(wait)
+                continue
             r.raise_for_status()
             return r.json()
         except Exception as e:
             if i == retries - 1:
                 logger.warning(f"GET {url} failed: {e}")
             else:
-                time.sleep(1)
+                time.sleep(2)
     return None
 
 
@@ -277,7 +282,7 @@ def get_team_goalie_stats(team_abbrev):
         wins += s["wins"]
         shutouts += s["shutouts"]
         max_gp = max(max_gp, s["gp"])
-        time.sleep(0.2)
+        time.sleep(0.5)
     return {"pts": wins + shutouts, "gp": max_gp, "wins": wins, "shutouts": shutouts}
 
 
@@ -298,7 +303,7 @@ def fetch_all_stats(player_ids):
             s = get_skater_playoff_stats(pid)
             players[player] = s
             fantasy[team_name] += s["pts"]
-            time.sleep(0.2)
+            time.sleep(0.5)
 
         gt = roster["goalie_team"]
         gs = get_team_goalie_stats(gt)

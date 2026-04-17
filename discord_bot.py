@@ -334,6 +334,11 @@ async def hockey_live_update():
     except Exception as e:
         print(f"[hockey_live_update] failed: {e}")
 
+@hockey_live_update.before_loop
+async def before_hockey_live_update():
+    await bot.wait_until_ready()
+    await asyncio.sleep(60)  # wait 60s after startup before first run
+
 
 @tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
 async def weekly_scan():
