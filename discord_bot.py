@@ -368,7 +368,7 @@ async def hockey_morning_recap():
         print(f"[hockey_morning_recap] failed: {e}")
 
 
-@tasks.loop(minutes=10)
+@tasks.loop(minutes=15)
 async def hockey_live_update():
     """Update Google Sheet with live playoff stats every 10 min during game hours."""
     now = datetime.datetime.now(ET)
