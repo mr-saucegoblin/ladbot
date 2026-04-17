@@ -347,7 +347,15 @@ async def _build_hockey_recap(stats, delta, old_snap) -> str:
         )
 
     response = await asyncio.to_thread(_ask)
-    return response.content[0].text
+    msg = response.content[0].text
+
+    # Always append a standings table
+    table = "\n\n**📊 Standings:**\n" + "\n".join(
+        f"> {s['rank']}. **{s['team']}** ({s['gm']}) — {s['pts']} pts"
+        + (f" ▲{s['rank_change']}" if s['rank_change'] > 0 else f" ▼{abs(s['rank_change'])}" if s['rank_change'] < 0 else "")
+        for s in data["standings"]
+    )
+    return msg + table
 
 
 @tasks.loop(time=datetime.time(hour=7, minute=30, tzinfo=ZoneInfo("America/Toronto")))
