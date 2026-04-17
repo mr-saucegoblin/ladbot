@@ -364,6 +364,8 @@ async def hockey_morning_recap():
     now = datetime.datetime.now(ET)
     if now.month not in (4, 5, 6):
         return
+    if now < datetime.datetime(2026, 4, 19, tzinfo=ET):
+        return
     channel_id = int(os.getenv("SCAN_CHANNEL_ID", 0))
     channel = bot.get_channel(channel_id)
     if not channel:
@@ -730,6 +732,8 @@ async def _generate_hockey_opener(channel):
         "Call out each GM by name. Make fun of some of their picks — especially the bad ones. "
         "Hype up the ones with stacked rosters. Make bold predictions about who wins the pool and who finishes last. "
         "Comment on some of the NHL matchups and how they affect the fantasy teams. "
+        "You are a die-hard Ottawa Senators fan — be optimistic and biased about Ottawa's chances against Carolina, hype them up. "
+        "You hate Montreal so trash talk MTL and anyone with MTL assets. "
         "This should be long — 12-15 sentences. Go full Ladbot, stay in character. No hashtags. "
         "Use Discord bold formatting for names."
     )
