@@ -421,7 +421,48 @@ def morning_recap():
     update_sheet(stats)
     delta = compute_delta(old_snap, stats)
     save_snapshot(stats)
-    return stats, delta
+    return stats, delta, old_snap
+
+
+def get_recap_data(stats, delta, old_snap):
+    """Return structured recap data for Claude to narrate."""
+    yesterday = (datetime.now(ET) - timedelta(days=1)).strftime("%Y-%m-%d")
+    games = get_game_summaries(yesterday)
+
+    # Top scorers yesterday
+    top_scorers = []
+    for player_name, pts in sorted(delta["players"].items(), key=lambda x: -x[1]):
+        fteam = PLAYER_TO_TEAM.get(player_name)
+        if not fteam:
+            abbrev = player_name.split()[0]
+            fteam = GOALIE_TO_FANTASY.get(abbrev)
+        if fteam:
+            top_scorers.append({
+                "player": player_name,
+                "pts": pts,
+                "fantasy_team": fteam,
+                "gm": ROSTERS[fteam]["gm"],
+            })
+
+    # Standings + rank changes
+    old_fantasy = old_snap.get("fantasy", {}) if old_snap else {}
+    old_ranked = {team: i + 1 for i, (team, _) in enumerate(sorted(old_fantasy.items(), key=lambda x: -x[1]))}
+    new_ranked = sorted(stats["fantasy"].items(), key=lambda x: -x[1])
+
+    standings = []
+    for i, (team, pts) in enumerate(new_ranked):
+        prev_rank = old_ranked.get(team, i + 1)
+        standings.append({
+            "rank": i + 1,
+            "prev_rank": prev_rank,
+            "rank_change": prev_rank - (i + 1),  # positive = moved up
+            "team": team,
+            "gm": ROSTERS[team]["gm"],
+            "pts": pts,
+            "pts_gained": pts - old_fantasy.get(team, 0),
+        })
+
+    return {"games": games, "top_scorers": top_scorers, "standings": standings}
 
 
 def build_discord_recap(stats, delta):

@@ -302,9 +302,57 @@ async def _send_long(channel: discord.abc.Messageable, text: str, reply_to: disc
 
 ET = ZoneInfo("America/Toronto")
 
+async def _build_hockey_recap(stats, delta, old_snap) -> str:
+    data = hockey_scraper.get_recap_data(stats, delta, old_snap)
+
+    games_str = ", ".join(
+        f"{g['away']} {g['away_score']}-{g['home_score']} {g['home']}"
+        for g in data["games"]
+    ) if data["games"] else "No playoff games last night"
+
+    scorers_str = "\n".join(
+        f"- {s['player']} ({s['gm']}): +{s['pts']} fantasy pts"
+        for s in data["top_scorers"]
+    ) if data["top_scorers"] else "- Nobody scored"
+
+    movers = [s for s in data["standings"] if s["rank_change"] != 0]
+    movers_str = "\n".join(
+        f"- {s['gm']} moved {'UP' if s['rank_change'] > 0 else 'DOWN'} {abs(s['rank_change'])} spot(s) "
+        f"(now #{s['rank']}, {s['pts']} pts)"
+        for s in movers
+    ) if movers else "- No changes in standings"
+
+    standings_str = "\n".join(
+        f"{s['rank']}. {s['gm']} ({s['team']}): {s['pts']} pts"
+        for s in data["standings"]
+    )
+
+    prompt = (
+        f"Last night's NHL playoff games: {games_str}\n\n"
+        f"Fantasy hockey points scored last night:\n{scorers_str}\n\n"
+        f"Standings changes:\n{movers_str}\n\n"
+        f"Current standings:\n{standings_str}\n\n"
+        "Write a morning fantasy hockey recap for the lads' group chat. "
+        "Call out anyone who got passed in the standings by name — mock them. "
+        "Hype up whoever scored big. Reference the actual game results. "
+        "Keep it punchy, 4-6 sentences max. Use bold for names. Stay fully in character. No hashtags."
+    )
+
+    def _ask():
+        return claude.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=400,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+    response = await asyncio.to_thread(_ask)
+    return response.content[0].text
+
+
 @tasks.loop(time=datetime.time(hour=7, minute=30, tzinfo=ZoneInfo("America/Toronto")))
 async def hockey_morning_recap():
-    """Post playoff fantasy hockey recap daily at 9:30 AM ET (April–June)."""
+    """Post playoff fantasy hockey recap daily at 7:30 AM ET (April–June)."""
     now = datetime.datetime.now(ET)
     if now.month not in (4, 5, 6):
         return
@@ -313,8 +361,8 @@ async def hockey_morning_recap():
     if not channel:
         return
     try:
-        stats, delta = await asyncio.to_thread(hockey_scraper.morning_recap)
-        msg = hockey_scraper.build_discord_recap(stats, delta)
+        stats, delta, old_snap = await asyncio.to_thread(hockey_scraper.morning_recap)
+        msg = await _build_hockey_recap(stats, delta, old_snap)
         await _send_long(channel, msg)
     except Exception as e:
         print(f"[hockey_morning_recap] failed: {e}")
@@ -656,8 +704,8 @@ async def testhockey(ctx: commands.Context):
         return
     await ctx.send(f"Fetching hockey stats, will post in <#{TEST_CHANNEL_ID}>...")
     try:
-        stats, delta = await asyncio.to_thread(hockey_scraper.morning_recap)
-        msg = hockey_scraper.build_discord_recap(stats, delta)
+        stats, delta, old_snap = await asyncio.to_thread(hockey_scraper.morning_recap)
+        msg = await _build_hockey_recap(stats, delta, old_snap)
         await _send_long(channel, msg)
     except Exception as e:
         await channel.send(f"Hockey recap failed: {e}")
