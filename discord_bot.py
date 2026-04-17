@@ -302,7 +302,7 @@ async def _send_long(channel: discord.abc.Messageable, text: str, reply_to: disc
 
 ET = ZoneInfo("America/Toronto")
 
-@tasks.loop(time=datetime.time(hour=9, minute=30, tzinfo=ZoneInfo("America/Toronto")))
+@tasks.loop(time=datetime.time(hour=7, minute=30, tzinfo=ZoneInfo("America/Toronto")))
 async def hockey_morning_recap():
     """Post playoff fantasy hockey recap daily at 9:30 AM ET (April–June)."""
     now = datetime.datetime.now(ET)
