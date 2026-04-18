@@ -732,7 +732,7 @@ async def _generate_hockey_opener(channel):
         f"Here are the 11 fantasy teams:\n{teams_str}\n\n"
         f"Here are the actual NHL playoff matchups:\n{_PLAYOFF_MATCHUPS}\n\n"
         "Format the team breakdowns as one bullet point per team (use Discord's '- ' bullet syntax). "
-        "Each bullet must be at least 3 sentences. Bold the GM's name and team name. "
+        "Each bullet must be 3-4 sentences — no more. Bold the GM's name and team name. "
         "For each team: comment on their skater talent, note how their players' actual NHL matchups help or hurt them, "
         "and call out at least one specific bad or risky pick by name and explain why it's a liability. "
         "Be more critical than positive — it's funnier. Goalies matter but focus primarily on skater talent. "
@@ -750,7 +750,7 @@ async def _generate_hockey_opener(channel):
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=3000,
+            max_tokens=4000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
