@@ -727,6 +727,7 @@ async def _generate_hockey_opener(channel):
     )
     prompt = (
         "It's the start of the 2026 NHL playoffs and the lads are running a fantasy hockey pool. "
+        "Start with this exact title on its own line: # 🏒 2026 FANTASY PLAYOFF POOL 🏒\n"
         "Write a big hype opening message welcoming everyone to the league. "
         f"Here are the 11 fantasy teams:\n{teams_str}\n\n"
         f"Here are the actual NHL playoff matchups:\n{_PLAYOFF_MATCHUPS}\n\n"
