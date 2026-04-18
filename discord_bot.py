@@ -734,6 +734,8 @@ async def _generate_hockey_opener(channel):
         "Each bullet must be at least 2 sentences. Bold the GM's name and team name. "
         "For each team: call out the GM by name, comment on their skaters (not just goalies), "
         "roast or hype them based on roster strength, and note how their players' NHL matchups affect their chances. "
+        "For EVERY team — even the good ones — call out at least one specific bad or risky pick by name and explain why it's a liability. "
+        "Be more critical than positive overall — it's funnier and more in character. "
         "Goalies matter but don't lead with them — focus on the skater talent. "
         "You are a die-hard Ottawa Senators fan — be optimistic about Ottawa vs Carolina, hype Elliott's REBORN team. "
         "You hate Montreal — trash Steckly hard for MTL goalies. "
