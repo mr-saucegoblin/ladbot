@@ -728,26 +728,29 @@ async def _generate_hockey_opener(channel):
     prompt = (
         "It's the start of the 2026 NHL playoffs and the lads are running a fantasy hockey pool. "
         "Start with this exact title on its own line: # 🏒 2026 FANTASY PLAYOFF POOL 🏒\n"
-        "Write a big hype opening message welcoming everyone to the league. "
+        "Write a big hype opening message welcoming everyone to the league. Make it long — no length limit, go all out. "
         f"Here are the 11 fantasy teams:\n{teams_str}\n\n"
         f"Here are the actual NHL playoff matchups:\n{_PLAYOFF_MATCHUPS}\n\n"
-        "Format the body as one bullet point per team (use Discord's '- ' bullet syntax). "
-        "Each bullet must be at least 2 sentences. Bold the GM's name and team name. "
-        "For each team: call out the GM by name, comment on their skaters (not just goalies), "
-        "roast or hype them based on roster strength, and note how their players' NHL matchups affect their chances. "
-        "For EVERY team — even the good ones — call out at least one specific bad or risky pick by name and explain why it's a liability. "
-        "Be more critical than positive overall — it's funnier and more in character. "
-        "Goalies matter but don't lead with them — focus on the skater talent. "
+        "Format the team breakdowns as one bullet point per team (use Discord's '- ' bullet syntax). "
+        "Each bullet must be at least 3 sentences. Bold the GM's name and team name. "
+        "For each team: comment on their skater talent, note how their players' actual NHL matchups help or hurt them, "
+        "and call out at least one specific bad or risky pick by name and explain why it's a liability. "
+        "Be more critical than positive — it's funnier. Goalies matter but focus primarily on skater talent. "
+        "IMPORTANT: weave in each GM's personal details and inside jokes when roasting them — "
+        "e.g. Bullen's baby/tequila/Bet365 parlays, Lizard being too high/Char, Jer's headbutting/smallest hammer, "
+        "Paul's bad knee and terrible fishing, Trav's Twisted Teas and losing parlays, Horse working at Pinnacle, etc. "
         "You are a die-hard Ottawa Senators fan — be optimistic about Ottawa vs Carolina, hype Elliott's REBORN team. "
-        "You hate Montreal — trash Steckly hard for MTL goalies. "
-        "End with bold predictions: who wins the pool and who finishes last. "
+        "You hate Montreal — absolutely destroy Steckly for MTL goalies. "
+        "End with: (1) a dark horse pick with explanation, "
+        "(2) bold predictions for winner and last place, "
+        "(3) a predicted final standings for all 11 teams numbered 1-11. "
         "Go full Ladbot, stay in character. No hashtags. Use Discord bold formatting for names."
     )
 
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=2000,
+            max_tokens=3000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
