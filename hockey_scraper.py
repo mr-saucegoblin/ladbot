@@ -250,71 +250,76 @@ def get_player_ids():
     return cache
 
 
-def get_skater_playoff_stats(player_id):
-    data = _get(f"{NHL_BASE}/player/{player_id}/landing")
+STATS_BASE = "https://api.nhle.com/stats/rest/en"
+
+
+def _fetch_stats_api_skaters():
+    """Fetch all playoff skater stats in one call. Returns name -> {pts, gp, team}."""
+    data = _get(f"{STATS_BASE}/skater/summary", params={
+        "cayenneExp": f"seasonId={SEASON} and gameTypeId={PLAYOFFS}",
+        "limit": 1000,
+    })
     if not data:
-        return {"pts": 0, "gp": 0, "team": ""}
-    for s in data.get("seasonTotals", []):
-        if s.get("season") == SEASON and s.get("gameTypeId") == PLAYOFFS:
-            return {
-                "pts": s.get("points", 0),
-                "gp": s.get("gamesPlayed", 0),
-                "team": data.get("currentTeamAbbrev", ""),
-            }
-    return {"pts": 0, "gp": 0, "team": data.get("currentTeamAbbrev", "")}
+        return {}
+    result = {}
+    for p in data.get("data", []):
+        name = p.get("skaterFullName", "")
+        team = p.get("teamAbbrevs", "")
+        if isinstance(team, list):
+            team = team[-1] if team else ""
+        result[name] = {
+            "pts": p.get("points", 0),
+            "gp": p.get("gamesPlayed", 0),
+            "team": team,
+        }
+    return result
 
 
-def get_goalie_playoff_stats(player_id):
-    data = _get(f"{NHL_BASE}/player/{player_id}/landing")
+def _fetch_stats_api_goalies():
+    """Fetch all playoff goalie stats in one call. Returns team_abbrev -> {wins, shutouts, gp}."""
+    data = _get(f"{STATS_BASE}/goalie/summary", params={
+        "cayenneExp": f"seasonId={SEASON} and gameTypeId={PLAYOFFS}",
+        "limit": 500,
+    })
     if not data:
-        return {"wins": 0, "shutouts": 0, "gp": 0}
-    for s in data.get("seasonTotals", []):
-        if s.get("season") == SEASON and s.get("gameTypeId") == PLAYOFFS:
-            return {
-                "wins": s.get("wins", 0),
-                "shutouts": s.get("shutouts", 0),
-                "gp": s.get("gamesPlayed", 0),
-            }
-    return {"wins": 0, "shutouts": 0, "gp": 0}
-
-
-def get_team_goalie_stats(team_abbrev):
-    """Aggregate wins + shutouts across all goalies on a team."""
-    roster = _get(f"{NHL_BASE}/roster/{team_abbrev}/{SEASON}")
-    if not roster:
-        return {"pts": 0, "gp": 0}
-    wins = shutouts = 0
-    max_gp = 0
-    for g in roster.get("goalies", []):
-        s = get_goalie_playoff_stats(g["id"])
-        wins += s["wins"]
-        shutouts += s["shutouts"]
-        max_gp = max(max_gp, s["gp"])
-        time.sleep(0.5)
-    return {"pts": wins + shutouts, "gp": max_gp, "wins": wins, "shutouts": shutouts}
+        return {}
+    team_stats = {}
+    for g in data.get("data", []):
+        team = g.get("teamAbbrevs", "")
+        if isinstance(team, list):
+            team = team[-1] if team else ""
+        if not team:
+            continue
+        if team not in team_stats:
+            team_stats[team] = {"wins": 0, "shutouts": 0, "gp": 0}
+        team_stats[team]["wins"] += g.get("wins", 0)
+        team_stats[team]["shutouts"] += g.get("shutouts", 0)
+        team_stats[team]["gp"] = max(team_stats[team]["gp"], g.get("gamesPlayed", 0))
+    return team_stats
 
 
 # ── Stats aggregation ─────────────────────────────────────────────────────────
 
-def fetch_all_stats(player_ids):
-    """Returns {players: {name: stats}, goalies: {name: stats}, fantasy: {team: pts}}"""
+def fetch_all_stats():
+    """Returns {players: {name: stats}, goalies: {name: stats}, fantasy: {team: pts}}.
+    Uses stats API — 2 calls total instead of one per player."""
+    skater_data = _fetch_stats_api_skaters()
+    goalie_data = _fetch_stats_api_goalies()
+
     players = {}
     goalies = {}
     fantasy = {name: 0 for name in ROSTERS}
 
     for team_name, roster in ROSTERS.items():
         for player in roster["skaters"]:
-            pid = player_ids.get(player)
-            if not pid:
-                players[player] = {"pts": 0, "gp": 0, "team": "???"}
-                continue
-            s = get_skater_playoff_stats(pid)
+            corrected = PLAYER_NAME_CORRECTIONS.get(player, player)
+            s = skater_data.get(corrected) or skater_data.get(player) or {"pts": 0, "gp": 0, "team": "???"}
             players[player] = s
             fantasy[team_name] += s["pts"]
-            time.sleep(0.5)
 
         gt = roster["goalie_team"]
-        gs = get_team_goalie_stats(gt)
+        gs = goalie_data.get(gt, {"wins": 0, "shutouts": 0, "gp": 0})
+        gs["pts"] = gs["wins"] + gs["shutouts"]
         goalies[f"{gt} Goalies"] = {**gs, "team": gt}
         fantasy[team_name] += gs["pts"]
 
@@ -489,17 +494,15 @@ def get_game_summaries(date_str):
 
 def update_sheet_only():
     """Fetch current stats and update sheet. Used for live updates during games."""
-    player_ids = get_player_ids()
-    stats = fetch_all_stats(player_ids)
+    stats = fetch_all_stats()
     update_sheet(stats)
     return stats
 
 
 def morning_recap():
     """Fetch stats, diff against yesterday's snapshot, update sheet, save new snapshot."""
-    player_ids = get_player_ids()
     old_snap = load_snapshot()
-    stats = fetch_all_stats(player_ids)
+    stats = fetch_all_stats()
     update_sheet(stats)
     delta = compute_delta(old_snap, stats)
     save_snapshot(stats)
