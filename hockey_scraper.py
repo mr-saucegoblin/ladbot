@@ -43,6 +43,7 @@ NHL_TEAMS = [
 # Known name differences between our roster and the NHL API
 PLAYER_NAME_CORRECTIONS = {
     "Tim Stutzle": "Tim Stützle",
+    "Juraj Slafkovsky": "Juraj Slafkovský",
 }
 
 # ── Rosters ───────────────────────────────────────────────────────────────────
