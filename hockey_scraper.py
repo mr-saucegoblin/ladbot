@@ -253,16 +253,31 @@ def get_player_ids():
 STATS_BASE = "https://api.nhle.com/stats/rest/en"
 
 
+def _fetch_stats_api_paginated(endpoint, params):
+    """Fetch all pages from a stats API endpoint. Returns list of all records."""
+    records = []
+    start = 0
+    page_size = 100
+    while True:
+        data = _get(endpoint, params={**params, "limit": page_size, "start": start})
+        if not data:
+            break
+        page = data.get("data", [])
+        records.extend(page)
+        if len(records) >= data.get("total", 0) or not page:
+            break
+        start += page_size
+        time.sleep(0.5)
+    return records
+
+
 def _fetch_stats_api_skaters():
-    """Fetch all playoff skater stats in one call. Returns name -> {pts, gp, team}."""
-    data = _get(f"{STATS_BASE}/skater/summary", params={
+    """Fetch all playoff skater stats. Returns name -> {pts, gp, team}."""
+    records = _fetch_stats_api_paginated(f"{STATS_BASE}/skater/summary", {
         "cayenneExp": f"seasonId={SEASON} and gameTypeId={PLAYOFFS}",
-        "limit": 1000,
     })
-    if not data:
-        return {}
     result = {}
-    for p in data.get("data", []):
+    for p in records:
         name = p.get("skaterFullName", "")
         team = p.get("teamAbbrevs", "")
         if isinstance(team, list):
@@ -276,15 +291,12 @@ def _fetch_stats_api_skaters():
 
 
 def _fetch_stats_api_goalies():
-    """Fetch all playoff goalie stats in one call. Returns team_abbrev -> {wins, shutouts, gp}."""
-    data = _get(f"{STATS_BASE}/goalie/summary", params={
+    """Fetch all playoff goalie stats. Returns team_abbrev -> {wins, shutouts, gp}."""
+    records = _fetch_stats_api_paginated(f"{STATS_BASE}/goalie/summary", {
         "cayenneExp": f"seasonId={SEASON} and gameTypeId={PLAYOFFS}",
-        "limit": 500,
     })
-    if not data:
-        return {}
     team_stats = {}
-    for g in data.get("data", []):
+    for g in records:
         team = g.get("teamAbbrevs", "")
         if isinstance(team, list):
             team = team[-1] if team else ""
@@ -310,10 +322,16 @@ def fetch_all_stats():
     goalies = {}
     fantasy = {name: 0 for name in ROSTERS}
 
+    normalized_skaters = {_normalize(k): v for k, v in skater_data.items()}
+
     for team_name, roster in ROSTERS.items():
         for player in roster["skaters"]:
             corrected = PLAYER_NAME_CORRECTIONS.get(player, player)
-            s = skater_data.get(corrected) or skater_data.get(player) or {"pts": 0, "gp": 0, "team": "???"}
+            s = (skater_data.get(corrected)
+                 or skater_data.get(player)
+                 or normalized_skaters.get(_normalize(corrected))
+                 or normalized_skaters.get(_normalize(player))
+                 or {"pts": 0, "gp": 0, "team": "???"})
             players[player] = s
             fantasy[team_name] += s["pts"]
 
