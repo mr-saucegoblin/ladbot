@@ -377,7 +377,7 @@ def update_schedule_tab():
     date_row = all_values[1]  # sheet row 2
     team_col = [row[0] if row else "" for row in all_values]
 
-    date_to_col = {cell: ci for ci, cell in enumerate(date_row) if cell}
+    date_to_col = {cell: ci for ci, cell in enumerate(date_row) if cell and cell.startswith("2026")}
     team_to_row = {
         cell.upper(): ri for ri, cell in enumerate(team_col)
         if cell and cell.upper() in POOL_NHL_TEAMS
