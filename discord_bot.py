@@ -359,6 +359,18 @@ async def _build_hockey_recap(stats, delta, old_snap) -> str:
     return msg + table
 
 
+@tasks.loop(time=datetime.time(hour=6, minute=0, tzinfo=ZoneInfo("America/Toronto")))
+async def hockey_schedule_update():
+    """Update the Schedule sheet tab daily at 6 AM ET (April–June)."""
+    now = datetime.datetime.now(ET)
+    if now.month not in (4, 5, 6):
+        return
+    try:
+        await asyncio.to_thread(hockey_scraper.update_schedule_tab)
+    except Exception as e:
+        print(f"[hockey_schedule_update] failed: {e}")
+
+
 @tasks.loop(time=datetime.time(hour=7, minute=30, tzinfo=ZoneInfo("America/Toronto")))
 async def hockey_morning_recap():
     """Post playoff fantasy hockey recap daily at 7:30 AM ET (April–June)."""
@@ -537,6 +549,7 @@ async def on_ready():
     weekly_scan.start()
     morning_greeting.start()
     daily_news.start()
+    hockey_schedule_update.start()
     hockey_morning_recap.start()
     hockey_live_update.start()
 
@@ -703,6 +716,17 @@ async def testchart(ctx: commands.Context, ticker: str = "CNQ.TO"):
         await ctx.send(file=discord.File(chart_path))
     finally:
         os.remove(chart_path)
+
+
+@bot.command(name="testschedule")
+async def testschedule(ctx: commands.Context):
+    """Manually trigger the schedule tab update."""
+    await ctx.send("Fetching NHL schedule and updating sheet...")
+    try:
+        await asyncio.to_thread(hockey_scraper.update_schedule_tab)
+        await ctx.send("Schedule tab updated!")
+    except Exception as e:
+        await ctx.send(f"Schedule update failed: {e}")
 
 
 @bot.command(name="testhockey")

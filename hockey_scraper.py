@@ -154,6 +154,14 @@ ALL_SKATERS = {p for r in ROSTERS.values() for p in r["skaters"]}
 PLAYER_TO_TEAM = {p: name for name, r in ROSTERS.items() for p in r["skaters"]}
 GOALIE_TO_FANTASY = {r["goalie_team"]: name for name, r in ROSTERS.items()}
 
+# Teams that appear in the schedule tab (all 16 pool teams' NHL clubs)
+POOL_NHL_TEAMS = {
+    "MTL", "EDM", "BOS", "LAK", "PIT", "MIN",
+    "CAR", "COL", "TBL", "BUF", "VGK", "OTT",
+    "DAL", "ANA", "UTA", "PHI",
+}
+SCHEDULE_TAB = "Schedule"  # Google Sheet tab name — update if different
+
 
 # ── NHL API helpers ───────────────────────────────────────────────────────────
 
@@ -311,6 +319,80 @@ def fetch_all_stats(player_ids):
         fantasy[team_name] += gs["pts"]
 
     return {"players": players, "goalies": goalies, "fantasy": fantasy}
+
+
+# ── Schedule tab ──────────────────────────────────────────────────────────────
+
+def fetch_playoff_schedule():
+    """Fetch all playoff game dates for pool teams, April 19 – June 30.
+    Uses /schedule/{date} which returns a full week — ~11 API calls total."""
+    from datetime import date as _date, timedelta
+    schedule = {}  # date_str -> set of team abbrevs playing
+    current = _date(2026, 4, 19)
+    end = _date(2026, 6, 30)
+    while current <= end:
+        week_key = current.strftime("%Y-%m-%d")
+        data = _get(f"{NHL_BASE}/schedule/{week_key}")
+        time.sleep(1)
+        if data:
+            for day in data.get("gameWeek", []):
+                day_date = day.get("date")
+                if not day_date:
+                    continue
+                for game in day.get("games", []):
+                    if game.get("gameType") != PLAYOFFS:
+                        continue
+                    away = game.get("awayTeam", {}).get("abbrev", "")
+                    home = game.get("homeTeam", {}).get("abbrev", "")
+                    if day_date not in schedule:
+                        schedule[day_date] = set()
+                    if away in POOL_NHL_TEAMS:
+                        schedule[day_date].add(away)
+                    if home in POOL_NHL_TEAMS:
+                        schedule[day_date].add(home)
+        current += timedelta(days=7)
+    return schedule
+
+
+def update_schedule_tab():
+    """Update the Schedule sheet tab with YES/blank for each team's game days."""
+    import gspread.utils
+    schedule = fetch_playoff_schedule()
+    if not schedule:
+        logger.warning("[schedule_tab] No schedule data fetched")
+        return
+
+    gc = _get_gspread_client()
+    ws = gc.open_by_key(SHEET_ID).worksheet(SCHEDULE_TAB)
+    all_values = ws.get_all_values()
+    if len(all_values) < 3:
+        logger.warning("[schedule_tab] Sheet looks empty")
+        return
+
+    date_row = all_values[1]  # sheet row 2
+    team_col = [row[0] if row else "" for row in all_values]
+
+    date_to_col = {cell: ci for ci, cell in enumerate(date_row) if cell}
+    team_to_row = {
+        cell.upper(): ri for ri, cell in enumerate(team_col)
+        if cell and cell.upper() in POOL_NHL_TEAMS
+    }
+
+    updates = []
+    for date_str, col_idx in date_to_col.items():
+        playing = schedule.get(date_str, set())
+        for team, row_idx in team_to_row.items():
+            val = "YES" if team in playing else ""
+            current = all_values[row_idx][col_idx] if col_idx < len(all_values[row_idx]) else ""
+            if val != current:
+                cell = gspread.utils.rowcol_to_a1(row_idx + 1, col_idx + 1)
+                updates.append({"range": cell, "values": [[val]]})
+
+    if updates:
+        ws.batch_update(updates)
+        logger.info(f"[schedule_tab] Updated {len(updates)} cells")
+    else:
+        logger.info("[schedule_tab] Already up to date")
 
 
 # ── Google Sheets ─────────────────────────────────────────────────────────────
