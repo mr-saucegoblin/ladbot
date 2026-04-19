@@ -359,6 +359,9 @@ def fetch_playoff_schedule():
     return schedule
 
 
+SCHEDULE_TEAMS = ["MTL", "EDM", "BOS", "LAK", "PIT", "MIN", "CAR", "COL", "TBL", "BUF", "VGK", "OTT", "DAL", "ANA", "UTA", "PHI"]
+
+
 def update_schedule_tab():
     """Update the Schedule sheet tab with YES/blank for each team's game days."""
     import gspread.utils
@@ -373,6 +376,13 @@ def update_schedule_tab():
     if len(all_values) < 3:
         logger.warning("[schedule_tab] Sheet looks empty")
         return
+
+    # Write team names to column A rows 3-18
+    team_col_updates = [[team] for team in SCHEDULE_TEAMS]
+    ws.update(team_col_updates, "A3")
+
+    # Re-read after writing team names
+    all_values = ws.get_all_values()
 
     date_row = all_values[1]  # sheet row 2
     team_col = [row[0] if row else "" for row in all_values]
