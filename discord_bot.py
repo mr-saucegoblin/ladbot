@@ -729,6 +729,17 @@ async def testschedule(ctx: commands.Context):
         await ctx.send(f"Schedule update failed: {e}")
 
 
+@bot.command(name="updatestats")
+async def updatestats(ctx: commands.Context):
+    """Manually update the AllData sheet tab with current stats."""
+    await ctx.send("Fetching stats and updating AllData tab...")
+    try:
+        await asyncio.to_thread(hockey_scraper.update_sheet_only)
+        await ctx.send("AllData tab updated!")
+    except Exception as e:
+        await ctx.send(f"Stats update failed: {e}")
+
+
 @bot.command(name="testhockey")
 async def testhockey(ctx: commands.Context):
     """Test the hockey morning recap — posts to test channel."""
