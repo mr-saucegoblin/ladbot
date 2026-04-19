@@ -327,16 +327,25 @@ async def _build_hockey_recap(stats, delta, old_snap) -> str:
         for s in data["standings"]
     )
 
+    potn = data["top_scorers"][0] if data["top_scorers"] else None
+    potn_str = (
+        f"{potn['player']} ({potn['gm']}'s team) with +{potn['pts']} fantasy pts"
+        if potn else "nobody (no points scored)"
+    )
+
     prompt = (
         f"Last night's NHL playoff games: {games_str}\n\n"
         f"Fantasy hockey points scored last night:\n{scorers_str}\n\n"
         f"Standings changes:\n{movers_str}\n\n"
         f"Current standings:\n{standings_str}\n\n"
+        f"Player of the Night: {potn_str}\n\n"
         "Write a morning fantasy hockey recap for the lads' group chat. "
         "Call out anyone who got passed in the standings by name — mock them hard. "
         "Hype up whoever scored big and name their specific players. Reference the actual game results and scores. "
         "If any goalies got wins or shutouts, mention it. "
-        "8-10 sentences, punchy. Use bold for names. Stay fully in character. No hashtags."
+        "End with a 'Player of the Night' section — bold the header '🌟 Player of the Night:', "
+        "name the player and their GM, big hype, tell them they're carrying their team. "
+        "8-10 sentences total, punchy. Use bold for names. Stay fully in character. No hashtags."
     )
 
     def _ask():
