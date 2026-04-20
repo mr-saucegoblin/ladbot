@@ -727,6 +727,21 @@ async def testchart(ctx: commands.Context, ticker: str = "CNQ.TO"):
         os.remove(chart_path)
 
 
+@bot.command(name="debugstats")
+async def debugstats(ctx: commands.Context):
+    """Debug: show goalie wins and cached game count."""
+    cache = hockey_scraper.load_boxscore_cache()
+    lines = [f"Cached games: {len(cache)}"]
+    for gid, g in cache.items():
+        lines.append(f"  Game {gid}: winner={g.get('winner')} shutout={g.get('shutout')}")
+    stats = await asyncio.to_thread(hockey_scraper.fetch_all_stats)
+    lines.append("Goalie pts:")
+    for name, s in stats["goalies"].items():
+        if s["pts"] > 0:
+            lines.append(f"  {name}: {s['pts']} pts")
+    await ctx.send("\n".join(lines) or "No data")
+
+
 @bot.command(name="testschedule")
 async def testschedule(ctx: commands.Context):
     """Manually trigger the schedule tab update."""
