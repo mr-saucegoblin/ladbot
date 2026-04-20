@@ -313,13 +313,19 @@ def _get_playoff_games_for_dates(dates):
     return games
 
 
+PLAYOFFS_START = "2026-04-18"
+
+
 def _update_boxscore_cache(cache, id_to_name):
     """Fetch any new FINAL games not yet in cache. Returns updated cache."""
-    from datetime import date, timedelta
-    dates = [
-        (date.today() - timedelta(days=i)).strftime("%Y-%m-%d")
-        for i in range(2)  # today + yesterday
-    ]
+    from datetime import date, timedelta, datetime
+    start = datetime.strptime(PLAYOFFS_START, "%Y-%m-%d").date()
+    today = date.today()
+    dates = []
+    current = start
+    while current <= today:
+        dates.append(current.strftime("%Y-%m-%d"))
+        current += timedelta(days=1)
     recent_games = _get_playoff_games_for_dates(dates)
 
     for gid, state in recent_games.items():
