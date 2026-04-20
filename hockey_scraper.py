@@ -28,6 +28,7 @@ SHEET_ID = "1PWah19k2BwMoahzlcap8pwUwMXsTDUbXndqiDjMyzC4"
 CREDS_FILE = os.getenv("GOOGLE_CREDS_FILE", "credentials.json")
 PLAYER_ID_CACHE = os.getenv("HOCKEY_PLAYER_ID_CACHE", "hockey_player_ids.json")
 SNAPSHOT_FILE = os.getenv("HOCKEY_SNAPSHOT_FILE", "hockey_snapshot.json")
+BOXSCORE_CACHE_FILE = os.getenv("BOXSCORE_CACHE_FILE", "boxscore_cache.json")
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 ET = ZoneInfo("America/Toronto")
 NHL_BASE = "https://api-web.nhle.com/v1"
@@ -251,95 +252,157 @@ def get_player_ids():
     return cache
 
 
-STATS_BASE = "https://api.nhle.com/stats/rest/en"
+# ── Boxscore cache ────────────────────────────────────────────────────────────
+
+def load_boxscore_cache():
+    if os.path.exists(BOXSCORE_CACHE_FILE):
+        with open(BOXSCORE_CACHE_FILE) as f:
+            return json.load(f)
+    return {}
 
 
-def _fetch_stats_api_paginated(endpoint, params):
-    """Fetch all pages from a stats API endpoint. Returns list of all records."""
-    records = []
-    start = 0
-    page_size = 100
-    while True:
-        data = _get(endpoint, params={**params, "limit": page_size, "start": start})
-        if not data:
-            break
-        page = data.get("data", [])
-        records.extend(page)
-        if len(records) >= data.get("total", 0) or not page:
-            break
-        start += page_size
-        time.sleep(0.5)
-    return records
+def save_boxscore_cache(cache):
+    with open(BOXSCORE_CACHE_FILE, "w") as f:
+        json.dump(cache, f)
 
 
-def _fetch_stats_api_skaters():
-    """Fetch all playoff skater stats. Returns name -> {pts, gp, team}."""
-    records = _fetch_stats_api_paginated(f"{STATS_BASE}/skater/summary", {
-        "cayenneExp": f"seasonId={SEASON} and gameTypeId={PLAYOFFS}",
-    })
-    result = {}
-    for p in records:
-        name = p.get("skaterFullName", "")
-        team = p.get("teamAbbrevs", "")
-        if isinstance(team, list):
-            team = team[-1] if team else ""
-        result[name] = {
-            "pts": p.get("points", 0),
-            "gp": p.get("gamesPlayed", 0),
-            "team": team,
-        }
-    return result
+def _parse_boxscore(game_id, id_to_name):
+    """Parse a single game boxscore. Returns {players: {name: {pts, team}}, winner, shutout}."""
+    data = _get(f"{NHL_BASE}/gamecenter/{game_id}/boxscore")
+    if not data:
+        return None
+
+    player_stats = data.get("playerByGameStats", {})
+    players = {}
+
+    for side in ("awayTeam", "homeTeam"):
+        team_abbrev = data.get(side, {}).get("abbrev", "")
+        for category in ("forwards", "defense"):
+            for p in player_stats.get(side, {}).get(category, []):
+                pid = p.get("playerId")
+                roster_name = id_to_name.get(pid)
+                if roster_name:
+                    players[roster_name] = {
+                        "pts": p.get("points", 0),
+                        "team": team_abbrev,
+                    }
+
+    away_score = data.get("awayTeam", {}).get("score", 0)
+    home_score = data.get("homeTeam", {}).get("score", 0)
+    away_abbrev = data.get("awayTeam", {}).get("abbrev", "")
+    home_abbrev = data.get("homeTeam", {}).get("abbrev", "")
+
+    if away_score > home_score:
+        winner, shutout = away_abbrev, home_score == 0
+    else:
+        winner, shutout = home_abbrev, away_score == 0
+
+    return {"players": players, "winner": winner, "shutout": shutout}
 
 
-def _fetch_stats_api_goalies():
-    """Fetch all playoff goalie stats. Returns team_abbrev -> {wins, shutouts, gp}."""
-    records = _fetch_stats_api_paginated(f"{STATS_BASE}/goalie/summary", {
-        "cayenneExp": f"seasonId={SEASON} and gameTypeId={PLAYOFFS}",
-    })
-    team_stats = {}
-    for g in records:
-        team = g.get("teamAbbrevs", "")
-        if isinstance(team, list):
-            team = team[-1] if team else ""
-        if not team:
-            continue
-        if team not in team_stats:
-            team_stats[team] = {"wins": 0, "shutouts": 0, "gp": 0}
-        team_stats[team]["wins"] += g.get("wins", 0)
-        team_stats[team]["shutouts"] += g.get("shutouts", 0)
-        team_stats[team]["gp"] = max(team_stats[team]["gp"], g.get("gamesPlayed", 0))
-    return team_stats
+def _get_playoff_games_for_dates(dates):
+    """Fetch game IDs + states for a list of date strings."""
+    games = {}
+    for date_str in dates:
+        data = _get(f"{NHL_BASE}/score/{date_str}")
+        if data:
+            for g in data.get("games", []):
+                if g.get("gameType") == PLAYOFFS:
+                    games[str(g["id"])] = g.get("gameState", "")
+        time.sleep(0.3)
+    return games
+
+
+def _update_boxscore_cache(cache, id_to_name):
+    """Fetch any new FINAL games not yet in cache. Returns updated cache."""
+    from datetime import date, timedelta
+    dates = [
+        (date.today() - timedelta(days=i)).strftime("%Y-%m-%d")
+        for i in range(2)  # today + yesterday
+    ]
+    recent_games = _get_playoff_games_for_dates(dates)
+
+    for gid, state in recent_games.items():
+        if state in ("FINAL", "OFF") and gid not in cache:
+            result = _parse_boxscore(gid, id_to_name)
+            if result:
+                cache[gid] = result
+                logger.info(f"[boxscore] Cached game {gid}")
+            time.sleep(0.5)
+    return cache
+
+
+def _get_live_boxscore_stats(id_to_name):
+    """Fetch stats from currently LIVE games. Returns {player_name: {pts, team}}."""
+    from datetime import date
+    data = _get(f"{NHL_BASE}/score/{date.today().strftime('%Y-%m-%d')}")
+    live = {}
+    if not data:
+        return live
+    for g in data.get("games", []):
+        if g.get("gameType") == PLAYOFFS and g.get("gameState") == "LIVE":
+            result = _parse_boxscore(str(g["id"]), id_to_name)
+            if result:
+                for name, s in result["players"].items():
+                    if name not in live or s["pts"] > live[name]["pts"]:
+                        live[name] = s
+            time.sleep(0.3)
+    return live
 
 
 # ── Stats aggregation ─────────────────────────────────────────────────────────
 
 def fetch_all_stats():
     """Returns {players: {name: stats}, goalies: {name: stats}, fantasy: {team: pts}}.
-    Uses stats API — 2 calls total instead of one per player."""
-    skater_data = _fetch_stats_api_skaters()
-    goalie_data = _fetch_stats_api_goalies()
+    Uses boxscore cache for all completed games + live fetch for in-progress games."""
+    player_ids = get_player_ids()
+    id_to_name = {v: k for k, v in player_ids.items()}
 
+    cache = load_boxscore_cache()
+    cache = _update_boxscore_cache(cache, id_to_name)
+    save_boxscore_cache(cache)
+
+    live = _get_live_boxscore_stats(id_to_name)
+
+    # Aggregate completed game stats
+    player_totals = {}   # name -> {pts, team}
+    team_wins = {}       # team_abbrev -> wins
+    team_shutouts = {}   # team_abbrev -> shutouts
+
+    for game in cache.values():
+        for name, s in game["players"].items():
+            if name not in player_totals:
+                player_totals[name] = {"pts": 0, "gp": 0, "team": s["team"]}
+            player_totals[name]["pts"] += s["pts"]
+            player_totals[name]["gp"] += 1
+        winner = game.get("winner", "")
+        if winner:
+            team_wins[winner] = team_wins.get(winner, 0) + 1
+            if game.get("shutout"):
+                team_shutouts[winner] = team_shutouts.get(winner, 0) + 1
+
+    # Layer live game points on top (don't double-count GP — live game not yet in cache)
+    for name, s in live.items():
+        if name not in player_totals:
+            player_totals[name] = {"pts": 0, "gp": 0, "team": s["team"]}
+        player_totals[name]["pts"] += s["pts"]
+
+    # Build result structure
     players = {}
     goalies = {}
     fantasy = {name: 0 for name in ROSTERS}
 
-    normalized_skaters = {_normalize(k): v for k, v in skater_data.items()}
-
     for team_name, roster in ROSTERS.items():
         for player in roster["skaters"]:
-            corrected = PLAYER_NAME_CORRECTIONS.get(player, player)
-            s = (skater_data.get(corrected)
-                 or skater_data.get(player)
-                 or normalized_skaters.get(_normalize(corrected))
-                 or normalized_skaters.get(_normalize(player))
-                 or {"pts": 0, "gp": 0, "team": "???"})
+            s = player_totals.get(player, {"pts": 0, "gp": 0, "team": "???"})
             players[player] = s
             fantasy[team_name] += s["pts"]
 
         gt = roster["goalie_team"]
-        gs = goalie_data.get(gt, {"wins": 0, "shutouts": 0, "gp": 0})
-        gs["pts"] = gs["wins"] + gs["shutouts"]
-        goalies[f"{gt} Goalies"] = {**gs, "team": gt}
+        wins = team_wins.get(gt, 0)
+        shutouts = team_shutouts.get(gt, 0)
+        gs = {"wins": wins, "shutouts": shutouts, "gp": wins, "pts": wins + shutouts, "team": gt}
+        goalies[f"{gt} Goalies"] = gs
         fantasy[team_name] += gs["pts"]
 
     return {"players": players, "goalies": goalies, "fantasy": fantasy}
