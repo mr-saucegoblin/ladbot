@@ -320,7 +320,7 @@ def _update_boxscore_cache(cache, id_to_name):
     """Fetch any new FINAL games not yet in cache. Returns updated cache."""
     from datetime import date, timedelta, datetime
     start = datetime.strptime(PLAYOFFS_START, "%Y-%m-%d").date()
-    today = date.today()
+    today = datetime.now(ET).date()
     dates = []
     current = start
     while current <= today:
@@ -339,20 +339,25 @@ def _update_boxscore_cache(cache, id_to_name):
 
 
 def _get_live_boxscore_stats(id_to_name):
-    """Fetch stats from currently LIVE games. Returns {player_name: {pts, team}}."""
-    from datetime import date
-    data = _get(f"{NHL_BASE}/score/{date.today().strftime('%Y-%m-%d')}")
+    """Fetch stats from LIVE/CRIT games. Checks today and yesterday to catch late OT games."""
+    now_et = datetime.now(ET)
+    dates = [now_et.strftime("%Y-%m-%d"), (now_et - timedelta(days=1)).strftime("%Y-%m-%d")]
     live = {}
-    if not data:
-        return live
-    for g in data.get("games", []):
-        if g.get("gameType") == PLAYOFFS and g.get("gameState") == "LIVE":
-            result = _parse_boxscore(str(g["id"]), id_to_name)
-            if result:
-                for name, s in result["players"].items():
-                    if name not in live or s["pts"] > live[name]["pts"]:
-                        live[name] = s
-            time.sleep(0.3)
+    seen = set()
+    for date_str in dates:
+        data = _get(f"{NHL_BASE}/score/{date_str}")
+        if not data:
+            continue
+        for g in data.get("games", []):
+            gid = str(g.get("id"))
+            if g.get("gameType") == PLAYOFFS and g.get("gameState") in ("LIVE", "CRIT") and gid not in seen:
+                seen.add(gid)
+                result = _parse_boxscore(gid, id_to_name)
+                if result:
+                    for name, s in result["players"].items():
+                        if name not in live or s["pts"] > live[name]["pts"]:
+                            live[name] = s
+                time.sleep(0.3)
     return live
 
 
