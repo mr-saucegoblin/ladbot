@@ -382,15 +382,16 @@ def format_digest(jobs: list[dict]) -> str:
         f"📋 **Job Digest — {today}**",
         f"Found {len(jobs)} match{'es' if len(jobs) != 1 else ''}\n",
     ]
+    blocks = []
     for job in jobs:
         comp = job.get("comp_text") or "Not listed"
         company = job.get("company") or "Unknown"
-        lines += [
-            SEP,
-            f"🏢 **{company}** — {job['title']}",
-            f"📍 {job.get('location', '?')} | 💰 {comp} | ⭐ Score: {job['score']}/100",
-            f"🔗 {job['url']}",
-            f"Why: {job.get('score_reasons', '')}",
-        ]
-    lines.append(SEP)
-    return "\n".join(lines)
+        blocks.append(
+            f"{SEP}\n"
+            f"🏢 **{company}** — {job['title']}\n"
+            f"📍 {job.get('location', '?')} | 💰 {comp} | ⭐ Score: {job['score']}/100\n"
+            f"🔗 {job['url']}\n"
+            f"Why: {job.get('score_reasons', '')}"
+        )
+    blocks.append(SEP)
+    return "\n\n".join(lines) + "\n\n" + "\n\n".join(blocks)
