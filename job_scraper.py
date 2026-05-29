@@ -182,12 +182,16 @@ def fetch_adzuna_jobs() -> list[dict]:
                 salary_min = r.get("salary_min") or 0
                 salary_max = r.get("salary_max") or 0
                 comp_value = int((salary_min + salary_max) / 2) if salary_min or salary_max else 0
-                comp_text = f"${comp_value:,}" if comp_value else ""
 
-                # Adzuna sometimes returns salary as hourly — annualize if < 500
+                # Annualize if hourly (< 500) or monthly (< 12000); discard if still junk
                 if 0 < comp_value < 500:
                     comp_value *= 2080
-                    comp_text = f"~${comp_value:,}/yr"
+                elif 0 < comp_value < 12000:
+                    comp_value *= 12
+                if comp_value < 30000:
+                    comp_value = 0  # discard implausible values
+
+                comp_text = f"~${comp_value:,}" if comp_value else ""
 
                 desc = r.get("description", "")
                 if not comp_value:
@@ -231,12 +235,20 @@ _HARD_EXCLUDE = [
     "property manager", "leasing agent", "appraisal technician",
     "intern", "co-op", "coop", "junior", "entry level",
     "coordinator", "receptionist", "administrative assistant",
+    "talent acquisition", "marketing specialist", "marketing manager",
+    "sales", "consultant", "associate,", " associate -", "associate ",
+    "engineer", "developer", "software", "data analyst", "data scientist",
+    "accountant", "bookkeeper", "auditor", "tax ",
 ]
-_TITLE_OVERRIDE = ["senior analyst", "principal analyst", "research analyst"]
+_TITLE_OVERRIDE = [
+    "senior associate", "principal", "managing director",
+    "senior analyst", "principal analyst", "research analyst",
+    "tax director", "tax vice president",
+]
 
 _SENIOR = [
     "director", "vice president", "vp ", "vp,", "vp-", "managing director",
-    "head of", "principal", "partner", "managing partner", "chief",
+    "head of", "principal", "managing partner", "chief",
 ]
 _MID = [" manager ", " manager,", "lead "]
 
@@ -251,7 +263,6 @@ _FUNCTION: dict[str, int] = {
 _LATAM = [
     "latin america", "latam", "emerging markets", "cross-border",
     "brazil", "mexico", "colombia", "peru", "chile", "argentina",
-    "international markets", "global markets",
 ]
 
 _PRIORITY_EMP = [
@@ -287,11 +298,12 @@ def score_job(job: dict) -> tuple[int, str]:
     full = f"{title} {desc} {company}"
     reasons, s = [], 0
 
-    # Seniority (25)
-    if any(kw in full for kw in _SENIOR):
+    # Seniority (25) — title only to avoid false positives from job descriptions
+    title_padded = f" {title} "
+    if any(kw in title_padded for kw in _SENIOR):
         s += 25
         reasons.append("senior title")
-    elif any(kw in f" {title} " for kw in _MID):
+    elif any(kw in title_padded for kw in _MID):
         s += 12
 
     # Function (20)
@@ -369,7 +381,7 @@ def format_alert(job: dict) -> str:
         f"🚨 **High Priority Match**\n"
         f"🏢 **{company}** — {job['title']}\n"
         f"📍 {job.get('location', '?')} | 💰 {comp} | ⭐ Score: {job['score']}/100\n"
-        f"🔗 {job['url']}\n"
+        f"🔗 <{job['url']}>\n"
         f"Why: {job.get('score_reasons', '')}"
     )
 
@@ -390,7 +402,7 @@ def format_digest(jobs: list[dict]) -> str:
             f"{SEP}\n"
             f"🏢 **{company}** — {job['title']}\n"
             f"📍 {job.get('location', '?')} | 💰 {comp} | ⭐ Score: {job['score']}/100\n"
-            f"🔗 {job['url']}\n"
+            f"🔗 <{job['url']}>\n"
             f"Why: {job.get('score_reasons', '')}"
         )
     blocks.append(SEP)

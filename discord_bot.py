@@ -843,6 +843,16 @@ async def debugjobs(ctx: commands.Context):
     await ctx.send(result)
 
 
+@bot.command(name="clearjobs")
+async def clearjobs(ctx: commands.Context):
+    """Wipe the jobs DB so testjobs re-scores everything fresh."""
+    import sqlite3
+    db_path = os.environ.get("JOB_DB_PATH", "jobs.db")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM job_postings")
+    await ctx.send("Jobs DB cleared.")
+
+
 @bot.command(name="testjobs")
 async def testjobs(ctx: commands.Context):
     """Run a job scrape and post top results to the test channel."""
