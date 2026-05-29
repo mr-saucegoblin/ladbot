@@ -550,46 +550,25 @@ async def daily_news():
 JOB_CHANNEL_ID = int(os.getenv("JOB_CHANNEL_ID", "891720029861732356"))
 
 
-@tasks.loop(hours=12)
-async def job_scrape_cycle():
-    """Scrape jobs every 12h and send real-time alerts for score >= 75."""
+@tasks.loop(time=datetime.time(hour=7, minute=30, tzinfo=ZoneInfo("America/Toronto")))
+async def job_daily():
+    """Scrape jobs and post digest daily at 7:30 AM ET."""
+    channel = bot.get_channel(JOB_CHANNEL_ID)
+    if not channel:
+        return
     try:
         await asyncio.to_thread(job_scraper.run_scrape, claude)
     except Exception as e:
-        print(f"[job_scrape_cycle] scrape failed: {e}")
+        print(f"[job_daily] scrape failed: {e}")
         return
-    try:
-        alerts = await asyncio.to_thread(job_scraper.get_unalerted_high_priority)
-        if not alerts:
-            return
-        channel = bot.get_channel(JOB_CHANNEL_ID)
-        if not channel:
-            return
-        for j in alerts:
-            await _send_long(channel, job_scraper.format_alert(j))
-        await asyncio.to_thread(job_scraper.mark_alerts_sent, [j["id"] for j in alerts])
-    except Exception as e:
-        print(f"[job_scrape_cycle] alert delivery failed: {e}")
-
-@job_scrape_cycle.before_loop
-async def before_job_scrape():
-    await bot.wait_until_ready()
-
-
-@tasks.loop(time=datetime.time(hour=8, minute=0, tzinfo=ZoneInfo("America/Toronto")))
-async def job_digest():
-    """Post daily job digest at 8 AM ET."""
     try:
         jobs = await asyncio.to_thread(job_scraper.get_digest_jobs)
         if not jobs:
             return
-        channel = bot.get_channel(JOB_CHANNEL_ID)
-        if not channel:
-            return
         await _send_long(channel, job_scraper.format_digest(jobs))
         await asyncio.to_thread(job_scraper.mark_digest_sent, [j["id"] for j in jobs])
     except Exception as e:
-        print(f"[job_digest] failed: {e}")
+        print(f"[job_daily] digest failed: {e}")
 
 
 # ── events ────────────────────────────────────────────────────────────────────
@@ -613,8 +592,7 @@ async def on_ready():
     hockey_schedule_update.start()
     hockey_morning_recap.start()
     hockey_live_update.start()
-    job_scrape_cycle.start()
-    job_digest.start()
+    job_daily.start()
 
 
 @bot.event
