@@ -835,6 +835,14 @@ async def testhockey(ctx: commands.Context):
         await channel.send(f"Hockey recap failed: {e}")
 
 
+@bot.command(name="debugjobs")
+async def debugjobs(ctx: commands.Context):
+    """Check what Indeed and Jobbank RSS feeds are actually returning."""
+    await ctx.send("Checking feeds...")
+    result = await asyncio.to_thread(job_scraper.debug_fetch)
+    await ctx.send(result)
+
+
 @bot.command(name="testjobs")
 async def testjobs(ctx: commands.Context):
     """Run a job scrape and post top results to the test channel."""

@@ -1,24 +1,27 @@
 """
 Job scraper and scoring engine.
 
-Fetches from Indeed Canada RSS and Jobbank.gc.ca RSS, scores postings
-against a target investment/finance profile, stores in SQLite, and
-exposes helpers for Discord delivery.
+Fetches from Adzuna Canada API, scores postings against a target
+investment/finance profile, stores in SQLite, and exposes helpers
+for Discord delivery.
 """
 
-import html
 import os
 import re
-import sqlite3
 import time
 import datetime
-import feedparser
+import requests
+import sqlite3
 from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/Toronto")
 SEP = "━━━━━━━━━━━━━━━━━━━━"
 
 _DB_PATH = os.environ.get("JOB_DB_PATH", os.path.join(os.path.dirname(__file__), "jobs.db"))
+
+ADZUNA_APP_ID  = os.environ.get("ADZUNA_APP_ID", "")
+ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY", "")
+ADZUNA_BASE    = "https://api.adzuna.com/v1/api/jobs/ca/search"
 
 
 # ── DB ────────────────────────────────────────────────────────────────────────
@@ -109,31 +112,24 @@ def mark_digest_sent(ids: list[int]):
 
 # ── Fetching ──────────────────────────────────────────────────────────────────
 
-INDEED_QUERIES = [
-    ("director finance", "Canada"),
-    ("vice president finance", "Canada"),
-    ("director investment", "Canada"),
-    ("VP portfolio management", "Canada"),
-    ("director capital markets", "Canada"),
-    ("director corporate development", "Canada"),
-    ("director structured finance", "Canada"),
-    ("VP investment management", "Canada"),
-    ("senior manager finance", "Canada"),
-    ("director credit", "Canada"),
+# 3 broad queries keep us well within Adzuna free tier (250 calls/month)
+ADZUNA_QUERIES = [
+    "portfolio management",
+    "private equity",
+    "structured finance",
+    "asset management",
+    "capital markets",
+    "corporate development",
+    "investment management",
+    "private credit",
+    "infrastructure finance",
+    "fund management",
+    "project finance",
+    "credit risk",
+    "mergers acquisitions",
+    "development finance",
+    "fixed income",
 ]
-
-JOBBANK_QUERIES = [
-    "director finance",
-    "vice president finance",
-    "director investment",
-]
-
-
-def _strip_html(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r"<[^>]+>", " ", text)
-    return re.sub(r"\s+", " ", html.unescape(text)).strip()
 
 
 def _extract_comp(text: str) -> tuple[str, int]:
@@ -147,93 +143,86 @@ def _extract_comp(text: str) -> tuple[str, int]:
     val = int(m.group(1).replace(",", ""))
     if m.group(2):
         val *= 1000
-    # annualize if looks hourly (< 500) or monthly (< 12000)
     if val < 500:
-        val *= 2080
+        val *= 2080   # hourly → annual
     elif val < 12000:
-        val *= 12
+        val *= 12     # monthly → annual
     return raw, val
 
 
-def _parse_indeed_entry(entry: object) -> dict:
-    title = entry.get("title", "")
-    company = ""
-    if " - " in title:
-        parts = title.rsplit(" - ", 1)
-        title, company = parts[0].strip(), parts[1].strip()
-    elif " at " in title.lower():
-        idx = title.lower().rfind(" at ")
-        company = title[idx + 4 :].strip()
-        title = title[:idx].strip()
-
-    summary = _strip_html(entry.get("summary", ""))
-    comp_text, comp_value = _extract_comp(f"{title} {summary}")
-
-    location = "Canada"
-    for tag in entry.get("tags", []):
-        if isinstance(tag, dict) and "location" in tag.get("scheme", ""):
-            location = tag.get("term", "Canada")
-            break
-
-    return {
-        "source": "indeed",
-        "title": title,
-        "company": company,
-        "location": location,
-        "url": entry.get("link", ""),
-        "description": summary[:4000],
-        "comp_text": comp_text,
-        "comp_value": comp_value,
-    }
+def _fetch_adzuna_page(query: str, page: int = 1) -> list[dict]:
+    resp = requests.get(
+        f"{ADZUNA_BASE}/{page}",
+        params={
+            "app_id": ADZUNA_APP_ID,
+            "app_key": ADZUNA_APP_KEY,
+            "what": query,
+            "results_per_page": 50,
+            "sort_by": "date",
+            "max_days_old": 14,
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json().get("results", [])
 
 
-def fetch_indeed_jobs() -> list[dict]:
+def fetch_adzuna_jobs() -> list[dict]:
     jobs, seen = [], set()
-    for query, location in INDEED_QUERIES:
-        url = f"https://ca.indeed.com/rss?q={query.replace(' ', '+')}&l={location}"
+    for query in ADZUNA_QUERIES:
         try:
-            feed = feedparser.parse(url, request_headers={"User-Agent": "Mozilla/5.0"})
-            time.sleep(1.5)
-            for entry in feed.entries:
-                link = entry.get("link", "")
-                if not link or link in seen:
+            results = _fetch_adzuna_page(query)
+            time.sleep(0.5)
+            for r in results:
+                url = r.get("redirect_url", "")
+                if not url or url in seen:
                     continue
-                seen.add(link)
-                jobs.append(_parse_indeed_entry(entry))
-        except Exception as e:
-            print(f"[job_scraper] Indeed error ({query}): {e}")
-    return jobs
+                seen.add(url)
 
+                salary_min = r.get("salary_min") or 0
+                salary_max = r.get("salary_max") or 0
+                comp_value = int((salary_min + salary_max) / 2) if salary_min or salary_max else 0
+                comp_text = f"${comp_value:,}" if comp_value else ""
 
-def fetch_jobbank_jobs() -> list[dict]:
-    jobs, seen = [], set()
-    for query in JOBBANK_QUERIES:
-        url = f"https://www.jobbank.gc.ca/jobsearch/rss?searchstring={query.replace(' ', '+')}&locationid=9219"
-        try:
-            feed = feedparser.parse(url, request_headers={"User-Agent": "Mozilla/5.0"})
-            time.sleep(1)
-            for entry in feed.entries:
-                link = entry.get("link", "")
-                if not link or link in seen:
-                    continue
-                seen.add(link)
-                summary = _strip_html(entry.get("summary", ""))
-                comp_text, comp_value = _extract_comp(summary)
-                src = entry.get("source") or {}
-                company = src.get("title", "") if isinstance(src, dict) else ""
+                # Adzuna sometimes returns salary as hourly — annualize if < 500
+                if 0 < comp_value < 500:
+                    comp_value *= 2080
+                    comp_text = f"~${comp_value:,}/yr"
+
+                desc = r.get("description", "")
+                if not comp_value:
+                    comp_text, comp_value = _extract_comp(desc)
+
+                location_obj = r.get("location", {})
+                location = location_obj.get("display_name", "Canada") if isinstance(location_obj, dict) else "Canada"
+
                 jobs.append({
-                    "source": "jobbank",
-                    "title": entry.get("title", ""),
-                    "company": company,
-                    "location": "Canada",
-                    "url": link,
-                    "description": summary[:4000],
+                    "source": "adzuna",
+                    "title": r.get("title", ""),
+                    "company": r.get("company", {}).get("display_name", ""),
+                    "location": location,
+                    "url": url,
+                    "description": desc[:4000],
                     "comp_text": comp_text,
                     "comp_value": comp_value,
                 })
         except Exception as e:
-            print(f"[job_scraper] Jobbank error ({query}): {e}")
+            print(f"[job_scraper] Adzuna error ({query}): {e}")
     return jobs
+
+
+def debug_fetch() -> str:
+    """Fetch first Adzuna query, report raw results."""
+    query = ADZUNA_QUERIES[0]
+    try:
+        results = _fetch_adzuna_page(query)
+        lines = [f"**Adzuna** (`{query}`) — {len(results)} results"]
+        for r in results[:5]:
+            company = r.get("company", {}).get("display_name", "?")
+            lines.append(f"  • {r.get('title', '?')} — {company}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"**Adzuna** error: {e}"
 
 
 # ── Scoring ───────────────────────────────────────────────────────────────────
@@ -355,8 +344,8 @@ def score_job(job: dict) -> tuple[int, str]:
 # ── Main scrape ───────────────────────────────────────────────────────────────
 
 def run_scrape() -> int:
-    """Fetch all sources, score, store. Returns count of new jobs stored (score >= 50)."""
-    all_jobs = fetch_indeed_jobs() + fetch_jobbank_jobs()
+    """Fetch, score, store. Returns count of new jobs stored (score >= 50)."""
+    all_jobs = fetch_adzuna_jobs()
     new_count = 0
     for job in all_jobs:
         if not job["url"] or _is_hard_excluded(job["title"]):
