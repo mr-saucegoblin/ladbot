@@ -554,7 +554,7 @@ JOB_CHANNEL_ID = int(os.getenv("JOB_CHANNEL_ID", "891720029861732356"))
 async def job_scrape_cycle():
     """Scrape jobs every 12h and send real-time alerts for score >= 75."""
     try:
-        await asyncio.to_thread(job_scraper.run_scrape)
+        await asyncio.to_thread(job_scraper.run_scrape, claude)
     except Exception as e:
         print(f"[job_scrape_cycle] scrape failed: {e}")
         return
@@ -863,7 +863,7 @@ async def testjobs(ctx: commands.Context):
         return
     await ctx.send(f"Running job scrape, results will post in <#{TEST_CHANNEL_ID}>...")
     try:
-        new_count = await asyncio.to_thread(job_scraper.run_scrape)
+        new_count = await asyncio.to_thread(job_scraper.run_scrape, claude)
         jobs = await asyncio.to_thread(job_scraper.get_digest_jobs)
         if not jobs:
             await channel.send("No job matches found (score >= 50). Try again after sources refresh.")

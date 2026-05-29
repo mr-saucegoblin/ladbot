@@ -2,8 +2,8 @@
 Job scraper and scoring engine.
 
 Fetches from Adzuna Canada API, scores postings against a target
-investment/finance profile, stores in SQLite, and exposes helpers
-for Discord delivery.
+investment/finance profile using Claude, stores in SQLite, and exposes
+helpers for Discord delivery.
 """
 
 import os
@@ -12,6 +12,7 @@ import time
 import datetime
 import requests
 import sqlite3
+import anthropic
 from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/Toronto")
@@ -229,144 +230,108 @@ def debug_fetch() -> str:
         return f"**Adzuna** error: {e}"
 
 
-# ── Scoring ───────────────────────────────────────────────────────────────────
+# ── Candidate profile ────────────────────────────────────────────────────────
+
+CANDIDATE_PROFILE = """
+CFA charterholder with ~10 years of finance experience.
+Current role: Manager, Finance & Valuations at a major Canadian real estate platform ($5B+ portfolio of private entities and a TSX-listed REIT).
+Core skills: DCF modelling, debt MTM/VTB valuation, structured finance, IFRS fair value, cash flow forecasting, covenant monitoring, loan documentation review.
+Technical: Python (data science and ML), Bloomberg Terminal, ARGUS Enterprise, advanced Excel.
+Languages: English (native), French (conversational), Spanish (B1 — actively developing).
+Target roles: Senior finance and investment positions (Director, VP, Senior Manager, or equivalent) at DFIs, pension funds, PE/infrastructure funds, fintechs, and Canadian banks with international mandates.
+Not interested in: analyst roles, associate roles (unless senior), pure accounting/audit, HR, marketing, engineering, or software development.
+Strong differentiators: CFA designation, debt/structured finance background, real asset valuation expertise, bilingual (EN/FR), developing Spanish.
+"""
+
+
+# ── Filtering ─────────────────────────────────────────────────────────────────
 
 _HARD_EXCLUDE = [
-    "property manager", "leasing agent", "appraisal technician",
     "intern", "co-op", "coop", "junior", "entry level",
-    "coordinator", "receptionist", "administrative assistant",
+    "receptionist", "administrative assistant",
     "talent acquisition", "marketing specialist", "marketing manager",
-    "sales", "consultant", "associate,", " associate -", "associate ",
-    "engineer", "developer", "software", "data analyst", "data scientist",
-    "accountant", "bookkeeper", "auditor", "tax ",
-]
-_TITLE_OVERRIDE = [
-    "senior associate", "principal", "managing director",
-    "senior analyst", "principal analyst", "research analyst",
-    "tax director", "tax vice president",
+    "software engineer", "software developer", "data engineer",
+    "bookkeeper", "auditor",
 ]
 
-_SENIOR = [
-    "director", "vice president", "vp ", "vp,", "vp-", "managing director",
-    "head of", "principal", "managing partner", "chief",
+_FINANCE_TITLE_KW = [
+    "finance", "investment", "portfolio", "capital", "credit", "fund",
+    "asset", "banking", "treasury", "equity", "debt", "structured",
+    "corporate", "director", "vice president", "vp", "head of",
+    "chief", "partner", "principal", "managing", "manager", "analyst",
+    "valuation", "lending", "mergers", "acquisition", "private equity",
 ]
-_MID = [" manager ", " manager,", "lead "]
-
-_FUNCTION: dict[str, int] = {
-    "investment": 7, "portfolio": 7, "asset management": 7, "fund management": 7,
-    "structured finance": 7, "project finance": 7, "infrastructure finance": 7,
-    "corporate development": 7, "m&a": 7, "merger": 5, "acquisition": 5,
-    "capital markets": 7, "credit": 6, "lending": 5, "debt finance": 6,
-    "private equity": 7, "fixed income": 5, "fp&a": 5, "treasury": 4,
-}
-
-_LATAM = [
-    "latin america", "latam", "emerging markets", "cross-border",
-    "brazil", "mexico", "colombia", "peru", "chile", "argentina",
-]
-
-_PRIORITY_EMP = [
-    "cdpq", "cpp investments", "omers", "teachers'", "ontario teachers",
-    "psp investments", "aimco", "bci group", "bci invest",
-    "export development canada", "edc ", "findev", "bdc ",
-    "cmhc", "brookfield", "northleaf", "harbourvest", "actis",
-    "wealthsimple", "koho", "clearco", "ifc ", "idb invest",
-]
-_SECONDARY_EMP = [
-    "scotiabank", "bmo ", "hsbc", "itau", "atkins", "bombardier",
-    "gildan", "kinross", "agnico", "lundin", "first quantum",
-    "pension", "private equity fund", "infrastructure fund",
-]
-
-_SOFT: dict[str, int] = {
-    "spanish": 3, "bilingual": 2, "cfa": 3, "chartered financial analyst": 3,
-    "remote-first": 2, "work from anywhere": 2, "distributed team": 2,
-}
 
 
 def _is_hard_excluded(title: str) -> bool:
     t = title.lower()
-    if any(ov in t for ov in _TITLE_OVERRIDE):
-        return False
     return any(excl in t for excl in _HARD_EXCLUDE)
 
 
-def score_job(job: dict) -> tuple[int, str]:
-    title = (job.get("title") or "").lower()
-    desc = (job.get("description") or "").lower()
-    company = (job.get("company") or "").lower()
-    full = f"{title} {desc} {company}"
-    reasons, s = [], 0
+def _is_finance_adjacent(job: dict) -> bool:
+    """Quick pre-filter: skip anything with no finance signal in title or company."""
+    t = (job.get("title") or "").lower()
+    c = (job.get("company") or "").lower()
+    return any(kw in t or kw in c for kw in _FINANCE_TITLE_KW)
 
-    # Seniority (25) — title only to avoid false positives from job descriptions
-    title_padded = f" {title} "
-    if any(kw in title_padded for kw in _SENIOR):
-        s += 25
-        reasons.append("senior title")
-    elif any(kw in title_padded for kw in _MID):
-        s += 12
 
-    # Function (20)
-    fn_pts, fn_hits = 0, []
-    for kw, pts in _FUNCTION.items():
-        if kw in full:
-            fn_pts += pts
-            fn_hits.append(kw)
-    s += min(fn_pts, 20)
-    if fn_hits:
-        reasons.append(f"function: {', '.join(fn_hits[:3])}")
+# ── Claude scoring ────────────────────────────────────────────────────────────
 
-    # LatAm (20)
-    latam_hits = [k for k in _LATAM if k in full]
-    if latam_hits:
-        s += 20
-        reasons.append(f"LatAm: {', '.join(latam_hits[:2])}")
-
-    # Employer (15)
-    if any(e in company or e in full for e in _PRIORITY_EMP):
-        s += 15
-        reasons.append("priority employer")
-    elif any(e in company or e in full for e in _SECONDARY_EMP):
-        s += 8
-        reasons.append("relevant employer")
-
-    # Remote (10)
-    if any(k in full for k in ["remote", "flexible location", "work from anywhere", "hybrid", "distributed"]):
-        s += 10
-        reasons.append("remote/flexible")
-
-    # Comp (10)
-    comp_val = job.get("comp_value") or 0
-    if comp_val >= 160000:
-        s += 10
-        reasons.append(f"comp ~${comp_val:,}")
-    elif comp_val >= 130000:
-        s += 5
-        reasons.append(f"comp ~${comp_val:,}")
-
-    # Soft boosts
-    for kw, pts in _SOFT.items():
-        if kw in full:
-            s += pts
-            reasons.append(kw)
-
-    return min(s, 100), " | ".join(reasons)
+def score_job_with_claude(job: dict, client: anthropic.Anthropic) -> tuple[int, str]:
+    """Score a job posting 0-100 against the candidate profile using Claude."""
+    prompt = (
+        f"You are evaluating a job posting for a specific candidate. "
+        f"Score the match from 0 to 100 and give a single-line reason.\n\n"
+        f"CANDIDATE PROFILE:\n{CANDIDATE_PROFILE}\n\n"
+        f"JOB POSTING:\n"
+        f"Title: {job.get('title', '')}\n"
+        f"Company: {job.get('company', 'Unknown')}\n"
+        f"Location: {job.get('location', '?')}\n"
+        f"Description: {(job.get('description') or '')[:1500]}\n\n"
+        f"Scoring guide:\n"
+        f"75-100: Strong match — seniority, function, and employer type all align well\n"
+        f"50-74: Decent match — some alignment but gaps exist\n"
+        f"25-49: Weak match — minimal alignment, probably not worth applying\n"
+        f"0-24: No match — wrong level, wrong function, or wrong industry\n\n"
+        f"Respond in exactly this format (two lines only):\n"
+        f"SCORE: [0-100]\n"
+        f"REASON: [one sentence]"
+    )
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=100,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        score_match = re.search(r"SCORE:\s*(\d+)", text)
+        reason_match = re.search(r"REASON:\s*(.+)", text)
+        score = int(score_match.group(1)) if score_match else 0
+        reason = reason_match.group(1).strip() if reason_match else text[:120]
+        return min(max(score, 0), 100), reason
+    except Exception as e:
+        print(f"[job_scraper] Claude scoring error: {e}")
+        return 0, "scoring error"
 
 
 # ── Main scrape ───────────────────────────────────────────────────────────────
 
-def run_scrape() -> int:
-    """Fetch, score, store. Returns count of new jobs stored (score >= 50)."""
+def run_scrape(claude_client: anthropic.Anthropic) -> int:
+    """Fetch, score with Claude, store. Returns count of new jobs stored (score >= 50)."""
     all_jobs = fetch_adzuna_jobs()
     new_count = 0
     for job in all_jobs:
-        if not job["url"] or _is_hard_excluded(job["title"]):
+        if not job["url"]:
             continue
-        sc, reasons = score_job(job)
+        if _is_hard_excluded(job["title"]):
+            continue
+        if not _is_finance_adjacent(job):
+            continue
+        sc, reason = score_job_with_claude(job, claude_client)
         if sc < 50:
             continue
         job["score"] = sc
-        job["score_reasons"] = reasons
+        job["score_reasons"] = reason
         if _upsert_job(job):
             new_count += 1
     return new_count
