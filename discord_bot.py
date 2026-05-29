@@ -34,6 +34,7 @@ from company_mapper import map_theme_to_companies
 from tweet_generator import generate_thread
 from chart_generator import generate_chart
 import hockey_scraper
+import job_scraper
 
 load_dotenv()
 
@@ -544,6 +545,53 @@ async def daily_news():
     await channel.send(f"{intro}\n\n{summary}")
 
 
+# ── job scraper tasks ─────────────────────────────────────────────────────────
+
+JOB_CHANNEL_ID = int(os.getenv("JOB_CHANNEL_ID", "891720029861732356"))
+
+
+@tasks.loop(hours=12)
+async def job_scrape_cycle():
+    """Scrape jobs every 12h and send real-time alerts for score >= 75."""
+    try:
+        await asyncio.to_thread(job_scraper.run_scrape)
+    except Exception as e:
+        print(f"[job_scrape_cycle] scrape failed: {e}")
+        return
+    try:
+        alerts = await asyncio.to_thread(job_scraper.get_unalerted_high_priority)
+        if not alerts:
+            return
+        channel = bot.get_channel(JOB_CHANNEL_ID)
+        if not channel:
+            return
+        for j in alerts:
+            await _send_long(channel, job_scraper.format_alert(j))
+        await asyncio.to_thread(job_scraper.mark_alerts_sent, [j["id"] for j in alerts])
+    except Exception as e:
+        print(f"[job_scrape_cycle] alert delivery failed: {e}")
+
+@job_scrape_cycle.before_loop
+async def before_job_scrape():
+    await bot.wait_until_ready()
+
+
+@tasks.loop(time=datetime.time(hour=8, minute=0, tzinfo=ZoneInfo("America/Toronto")))
+async def job_digest():
+    """Post daily job digest at 8 AM ET."""
+    try:
+        jobs = await asyncio.to_thread(job_scraper.get_digest_jobs)
+        if not jobs:
+            return
+        channel = bot.get_channel(JOB_CHANNEL_ID)
+        if not channel:
+            return
+        await _send_long(channel, job_scraper.format_digest(jobs))
+        await asyncio.to_thread(job_scraper.mark_digest_sent, [j["id"] for j in jobs])
+    except Exception as e:
+        print(f"[job_digest] failed: {e}")
+
+
 # ── events ────────────────────────────────────────────────────────────────────
 
 @bot.event
@@ -555,12 +603,18 @@ async def on_ready():
     if data_db and not os.path.exists(data_db) and os.path.exists(app_db):
         shutil.copy(app_db, data_db)
         print(f"Copied {app_db} → {data_db}")
+    try:
+        job_scraper.init_db()
+    except Exception as e:
+        print(f"[on_ready] job DB init failed: {e}")
     weekly_scan.start()
     morning_greeting.start()
     daily_news.start()
     hockey_schedule_update.start()
     hockey_morning_recap.start()
     hockey_live_update.start()
+    job_scrape_cycle.start()
+    job_digest.start()
 
 
 @bot.event
@@ -779,6 +833,27 @@ async def testhockey(ctx: commands.Context):
         await _send_long(channel, msg)
     except Exception as e:
         await channel.send(f"Hockey recap failed: {e}")
+
+
+@bot.command(name="testjobs")
+async def testjobs(ctx: commands.Context):
+    """Run a job scrape and post top results to the test channel."""
+    TEST_CHANNEL_ID = 891720029861732356
+    channel = bot.get_channel(TEST_CHANNEL_ID)
+    if not channel:
+        await ctx.send("Test channel not found.")
+        return
+    await ctx.send(f"Running job scrape, results will post in <#{TEST_CHANNEL_ID}>...")
+    try:
+        new_count = await asyncio.to_thread(job_scraper.run_scrape)
+        jobs = await asyncio.to_thread(job_scraper.get_digest_jobs)
+        if not jobs:
+            await channel.send("No job matches found (score >= 50). Try again after sources refresh.")
+            return
+        await channel.send(f"Scrape done — {new_count} new jobs stored. Showing all undigested matches:")
+        await _send_long(channel, job_scraper.format_digest(jobs))
+    except Exception as e:
+        await channel.send(f"Job scrape failed: {e}")
 
 
 # ── entrypoint ────────────────────────────────────────────────────────────────
