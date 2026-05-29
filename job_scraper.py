@@ -328,6 +328,7 @@ def run_scrape(claude_client: anthropic.Anthropic) -> int:
         if not _is_finance_adjacent(job):
             continue
         sc, reason = score_job_with_claude(job, claude_client)
+        time.sleep(1.5)  # stay under 50 RPM rate limit
         if sc < 50:
             continue
         job["score"] = sc
