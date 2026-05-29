@@ -13,6 +13,7 @@ import datetime
 import requests
 import sqlite3
 import anthropic
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/Toronto")
@@ -81,6 +82,13 @@ def _upsert_job(job: dict) -> bool:
         return True
 
 
+def reset_db():
+    """Drop and recreate the job_postings table."""
+    with _conn() as conn:
+        conn.execute("DROP TABLE IF EXISTS job_postings")
+    init_db()
+
+
 def get_unalerted_high_priority() -> list[dict]:
     with _conn() as conn:
         rows = conn.execute(
@@ -113,7 +121,7 @@ def mark_digest_sent(ids: list[int]):
 
 # ── Fetching ──────────────────────────────────────────────────────────────────
 
-# 3 broad queries keep us well within Adzuna free tier (250 calls/month)
+# Broad functional queries — ~20 calls/run, ~40/month (free tier: 250/month)
 ADZUNA_QUERIES = [
     "portfolio management",
     "private equity",
@@ -130,6 +138,63 @@ ADZUNA_QUERIES = [
     "mergers acquisitions",
     "development finance",
     "fixed income",
+    # LATAM / international focus
+    "latin america finance",
+    "emerging markets investment",
+    "international development finance",
+    "global infrastructure investment",
+    "real assets investment",
+]
+
+# Targeted company searches — run weekly (Monday) to stay within Adzuna free tier
+# Uses Adzuna 'who' param to filter by employer name
+COMPANY_QUERIES = [
+    # Pension funds
+    "Ontario Teachers Pension",
+    "OMERS",
+    "CPP Investments",
+    "PSP Investments",
+    "AIMCo",
+    "BCI",
+    "CDPQ",
+    "HOOPP",
+    "OPTrust",
+    # PE / Infrastructure / Asset Management
+    "Brookfield Asset Management",
+    "Brookfield Real Estate",
+    "Oxford Properties",
+    "Northleaf Capital",
+    "Harbourvest",
+    "Stonepeak",
+    "Fiera Capital",
+    "Ninepoint Partners",
+    "Patrizia",
+    "Patria Investments",
+    # DFIs / Crown
+    "Export Development Canada",
+    "FinDev Canada",
+    "BDC",
+    "CMHC",
+    "IFC",
+    "IDB Invest",
+    # Banks with international / LatAm desks
+    "Scotiabank",
+    "BMO",
+    "HSBC Canada",
+    "Itau",
+    # Fintechs
+    "Wealthsimple",
+    "Koho",
+    "Clearco",
+    "Equitable Bank",
+    # Large Canadian corporates with LatAm ops
+    "AtkinsRealis",
+    "Bombardier",
+    "Kinross Gold",
+    "Agnico Eagle",
+    "Lundin",
+    "First Quantum",
+    "Wheaton Precious Metals",
 ]
 
 
@@ -151,32 +216,46 @@ def _extract_comp(text: str) -> tuple[str, int]:
     return raw, val
 
 
-def _fetch_adzuna_page(query: str, page: int = 1) -> list[dict]:
-    resp = requests.get(
-        f"{ADZUNA_BASE}/{page}",
-        params={
-            "app_id": ADZUNA_APP_ID,
-            "app_key": ADZUNA_APP_KEY,
-            "what": query,
-            "results_per_page": 50,
-            "sort_by": "date",
-            "max_days_old": 14,
-        },
-        timeout=15,
-    )
+def _canonical_url(url: str) -> str:
+    """Strip tracking params and normalise /land/ad/ → /details/ for dedup."""
+    parsed = urlparse(url)
+    path = re.sub(r"^/land/ad/", "/details/", parsed.path)
+    return f"{parsed.scheme}://{parsed.netloc}{path}"
+
+
+def _fetch_adzuna_page(query: str, page: int = 1, company: str = "") -> list[dict]:
+    params = {
+        "app_id": ADZUNA_APP_ID,
+        "app_key": ADZUNA_APP_KEY,
+        "what": query,
+        "results_per_page": 50,
+        "sort_by": "date",
+        "max_days_old": 14,
+    }
+    if company:
+        params["who"] = company
+    resp = requests.get(f"{ADZUNA_BASE}/{page}", params=params, timeout=15)
     resp.raise_for_status()
     return resp.json().get("results", [])
 
 
-def fetch_adzuna_jobs() -> list[dict]:
+def fetch_adzuna_jobs(include_company_queries: bool = False) -> list[dict]:
     jobs, seen = [], set()
-    for query in ADZUNA_QUERIES:
+
+    query_pairs = [(q, "") for q in ADZUNA_QUERIES]
+    if include_company_queries:
+        query_pairs += [("finance director investment vice president manager", c) for c in COMPANY_QUERIES]
+
+    for query, company in query_pairs:
         try:
-            results = _fetch_adzuna_page(query)
+            results = _fetch_adzuna_page(query, company=company)
             time.sleep(0.5)
             for r in results:
                 url = r.get("redirect_url", "")
-                if not url or url in seen:
+                if not url:
+                    continue
+                url = _canonical_url(url)
+                if url in seen:
                     continue
                 seen.add(url)
 
@@ -192,11 +271,10 @@ def fetch_adzuna_jobs() -> list[dict]:
                 if comp_value < 30000:
                     comp_value = 0  # discard implausible values
 
-                comp_text = f"~${comp_value:,}" if comp_value else ""
-
                 desc = r.get("description", "")
                 if not comp_value:
-                    comp_text, comp_value = _extract_comp(desc)
+                    _, comp_value = _extract_comp(desc)
+                comp_text = f"~${comp_value:,}" if comp_value else ""
 
                 location_obj = r.get("location", {})
                 location = location_obj.get("display_name", "Canada") if isinstance(location_obj, dict) else "Canada"
@@ -217,17 +295,22 @@ def fetch_adzuna_jobs() -> list[dict]:
 
 
 def debug_fetch() -> str:
-    """Fetch first Adzuna query, report raw results."""
-    query = ADZUNA_QUERIES[0]
-    try:
-        results = _fetch_adzuna_page(query)
-        lines = [f"**Adzuna** (`{query}`) — {len(results)} results"]
-        for r in results[:5]:
-            company = r.get("company", {}).get("display_name", "?")
-            lines.append(f"  • {r.get('title', '?')} — {company}")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"**Adzuna** error: {e}"
+    """Fetch first functional query + first company query, report raw results."""
+    lines = []
+    for label, query, company in [
+        ("functional", ADZUNA_QUERIES[0], ""),
+        ("company", "finance director OR investment OR vice president", COMPANY_QUERIES[0]),
+    ]:
+        try:
+            results = _fetch_adzuna_page(query, company=company)
+            tag = f"`{query}`" + (f" @ {company}" if company else "")
+            lines.append(f"**Adzuna {label}** ({tag}) — {len(results)} results")
+            for r in results[:3]:
+                co = r.get("company", {}).get("display_name", "?")
+                lines.append(f"  • {r.get('title', '?')} — {co}")
+        except Exception as e:
+            lines.append(f"**Adzuna {label}** error: {e}")
+    return "\n".join(lines)
 
 
 # ── Candidate profile ────────────────────────────────────────────────────────
@@ -238,9 +321,38 @@ Current role: Manager, Finance & Valuations at a major Canadian real estate plat
 Core skills: DCF modelling, debt MTM/VTB valuation, structured finance, IFRS fair value, cash flow forecasting, covenant monitoring, loan documentation review.
 Technical: Python (data science and ML), Bloomberg Terminal, ARGUS Enterprise, advanced Excel.
 Languages: English (native), French (conversational), Spanish (B1 — actively developing).
-Target roles: Senior finance and investment positions (Director, VP, Senior Manager, or equivalent) at DFIs, pension funds, PE/infrastructure funds, fintechs, and Canadian banks with international mandates.
-Not interested in: analyst roles, associate roles (unless senior), pure accounting/audit, HR, marketing, engineering, or software development.
-Strong differentiators: CFA designation, debt/structured finance background, real asset valuation expertise, bilingual (EN/FR), developing Spanish.
+
+Current level: Manager. Target roles: Senior Manager or Director (realistic next step). VP is a stretch but worth applying if the fit is exceptional. Managing Director, Partner, or Head-of roles are long shots — flag as reach if surfaced.
+Nice-to-have (not required): Canadian-based roles at organizations with Latin American or emerging markets mandates/operations (e.g. Canadian banks with LatAm desks, Canadian mining/energy companies with LatAm assets, DFIs, Canadian PE/pension funds with international portfolios). This is a bonus, not a filter.
+
+Priority employers (these are dream targets — score employer fit generously if posting is from one of these):
+- Pension funds: Ontario Teachers' Pension Plan, OMERS, Oxford Properties, CPP Investments, PSP Investments, AIMCo, BCI (bcIMC), CDPQ, HOOPP, OPTrust
+- PE / Infrastructure / Asset Mgmt: Brookfield Asset Management, Brookfield Real Estate Partners, Northleaf Capital, Harbourvest, Stonepeak, Fiera Capital, Ninepoint Partners, Patrizia, Patria Investments
+- DFIs / Crown corps: EDC, FinDev Canada, BDC, CMHC, IFC (World Bank), IDB Invest
+- Banks with international / LatAm desks: Scotiabank, BMO, HSBC Canada, Itaú Canada
+- Large Canadian corporates with LatAm ops: AtkinsRéalis, Bombardier, Gildan, Kinross Gold, Agnico Eagle, Lundin Group, First Quantum Minerals, Wheaton Precious Metals
+- Canadian fintechs: Wealthsimple, Koho, Clearco, Moka, Equitable Bank
+
+Not interested in: pure analyst/junior associate roles, pure accounting/audit, HR, marketing, software engineering.
+Strong differentiators: CFA, structured debt / real asset valuation, bilingual EN/FR, developing Spanish (relevant for LatAm roles).
+"""
+
+SCORING_GUIDE = """
+Scoring guide (0–100):
+75–100: Strong match — Senior Manager or Director level, right function (investment/finance/valuation), right employer type. Realistic to get an interview.
+50–74: Decent match — one gap exists: either seniority is a slight stretch (VP), or function is adjacent, or employer type is second-tier. Still worth applying.
+25–49: Weak match — VP/MD level (likely overleveled for candidate's current experience), or function is tangential, or employer is a poor fit.
+0–24: No match — wrong level (analyst/associate going down, or MD/Partner too far up), wrong function, or irrelevant industry.
+
+Seniority calibration:
+- Senior Manager / Director → ideal, score generously on fit
+- VP → apply a modest reach penalty (-5 to -10 pts) unless function/employer fit is exceptional
+- Managing Director / Partner / Head of → long shot, cap score at 65 regardless of other fit
+
+Apply these bonuses before arriving at your final score:
++10 pts — employer is on the priority list above (pension fund, DFI, Brookfield-family, IFC/IDB, etc.)
++5 pts — role has explicit Latin America, emerging markets, or international mandate (nice-to-have, not required)
+These bonuses can stack, but LatAm exposure alone should never push a weak role into 50+ territory.
 """
 
 
@@ -288,11 +400,7 @@ def score_job_with_claude(job: dict, client: anthropic.Anthropic) -> tuple[int, 
         f"Company: {job.get('company', 'Unknown')}\n"
         f"Location: {job.get('location', '?')}\n"
         f"Description: {(job.get('description') or '')[:1500]}\n\n"
-        f"Scoring guide:\n"
-        f"75-100: Strong match — seniority, function, and employer type all align well\n"
-        f"50-74: Decent match — some alignment but gaps exist\n"
-        f"25-49: Weak match — minimal alignment, probably not worth applying\n"
-        f"0-24: No match — wrong level, wrong function, or wrong industry\n\n"
+        f"{SCORING_GUIDE}\n"
         f"Respond in exactly this format (two lines only):\n"
         f"SCORE: [0-100]\n"
         f"REASON: [one sentence]"
@@ -316,9 +424,9 @@ def score_job_with_claude(job: dict, client: anthropic.Anthropic) -> tuple[int, 
 
 # ── Main scrape ───────────────────────────────────────────────────────────────
 
-def run_scrape(claude_client: anthropic.Anthropic) -> int:
+def run_scrape(claude_client: anthropic.Anthropic, include_company_queries: bool = False) -> int:
     """Fetch, score with Claude, store. Returns count of new jobs stored (score >= 50)."""
-    all_jobs = fetch_adzuna_jobs()
+    all_jobs = fetch_adzuna_jobs(include_company_queries=include_company_queries)
     new_count = 0
     for job in all_jobs:
         if not job["url"]:

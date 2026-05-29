@@ -552,12 +552,14 @@ JOB_CHANNEL_ID = int(os.getenv("JOB_CHANNEL_ID", "891720029861732356"))
 
 @tasks.loop(time=datetime.time(hour=7, minute=30, tzinfo=ZoneInfo("America/Toronto")))
 async def job_daily():
-    """Scrape jobs and post digest daily at 7:30 AM ET."""
+    """Scrape jobs and post digest every Monday at 7:30 AM ET."""
+    if datetime.datetime.now(ZoneInfo("America/Toronto")).weekday() != 0:
+        return
     channel = bot.get_channel(JOB_CHANNEL_ID)
     if not channel:
         return
     try:
-        await asyncio.to_thread(job_scraper.run_scrape, claude)
+        await asyncio.to_thread(job_scraper.run_scrape, claude, True)
     except Exception as e:
         print(f"[job_daily] scrape failed: {e}")
         return
@@ -841,7 +843,7 @@ async def testjobs(ctx: commands.Context):
         return
     await ctx.send(f"Running job scrape, results will post in <#{TEST_CHANNEL_ID}>...")
     try:
-        new_count = await asyncio.to_thread(job_scraper.run_scrape, claude)
+        new_count = await asyncio.to_thread(job_scraper.run_scrape, claude, True)
         jobs = await asyncio.to_thread(job_scraper.get_digest_jobs)
         if not jobs:
             await channel.send("No job matches found (score >= 50). Try again after sources refresh.")
@@ -850,6 +852,13 @@ async def testjobs(ctx: commands.Context):
         await _send_long(channel, job_scraper.format_digest(jobs))
     except Exception as e:
         await channel.send(f"Job scrape failed: {e}")
+
+
+@bot.command(name="resetjobs")
+async def resetjobs(ctx: commands.Context):
+    """Clear the jobs DB so next scrape starts fresh."""
+    await asyncio.to_thread(job_scraper.reset_db)
+    await ctx.send("Jobs DB cleared. Run `!testjobs` to scrape fresh.")
 
 
 # ── entrypoint ────────────────────────────────────────────────────────────────
