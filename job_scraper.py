@@ -424,6 +424,11 @@ def score_job_with_claude(job: dict, client: anthropic.Anthropic) -> tuple[int, 
 
 # ── Main scrape ───────────────────────────────────────────────────────────────
 
+def _is_known_url(url: str) -> bool:
+    with _conn() as conn:
+        return conn.execute("SELECT 1 FROM job_postings WHERE url = ?", (url,)).fetchone() is not None
+
+
 def run_scrape(claude_client: anthropic.Anthropic, include_company_queries: bool = False) -> int:
     """Fetch, score with Claude, store. Returns count of new jobs stored (score >= 50)."""
     all_jobs = fetch_adzuna_jobs(include_company_queries=include_company_queries)
@@ -434,6 +439,8 @@ def run_scrape(claude_client: anthropic.Anthropic, include_company_queries: bool
         if _is_hard_excluded(job["title"]):
             continue
         if not _is_finance_adjacent(job):
+            continue
+        if _is_known_url(job["url"]):
             continue
         sc, reason = score_job_with_claude(job, claude_client)
         time.sleep(1.5)  # stay under 50 RPM rate limit
