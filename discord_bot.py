@@ -132,6 +132,10 @@ histories: dict[int, list[dict]] = _load_histories()
 last_triggered: dict[int, float] = {}
 ACTIVE_WINDOW = 20 * 60  # 20 minutes in seconds
 
+# Sleep mode: {channel_id: wake_at_unix_timestamp}
+sleep_until: dict[int, float] = {}
+SLEEP_DURATION = 60 * 60  # 1 hour
+
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -626,10 +630,12 @@ async def on_message(message: discord.Message):
 
     # Respond when @mentioned, "ladbot" appears, or channel is in active window
     now = time.time()
-    explicitly_called = (
-        bot.user in message.mentions or "ladbot" in raw_text.lower()
-    ) and not message.content.startswith("!")
-    in_active_window = (now - last_triggered.get(channel_id, 0)) < ACTIVE_WINDOW
+    asleep = now < sleep_until.get(channel_id, 0)
+
+    mentioned = bot.user in message.mentions and not message.content.startswith("!")
+    text_called = "ladbot" in raw_text.lower() and not message.content.startswith("!")
+    explicitly_called = mentioned or (text_called and not asleep)
+    in_active_window = (now - last_triggered.get(channel_id, 0)) < ACTIVE_WINDOW and not asleep
 
     if explicitly_called:
         last_triggered[channel_id] = now
@@ -759,6 +765,33 @@ async def testchart(ctx: commands.Context, ticker: str = "CNQ.TO"):
         await ctx.send(file=discord.File(chart_path))
     finally:
         os.remove(chart_path)
+
+
+@bot.command(name="sleep")
+async def sleep_cmd(ctx: commands.Context):
+    """Put Ladbot to sleep for 1 hour — only wakes for direct @mentions."""
+    sleep_until[ctx.channel.id] = time.time() + SLEEP_DURATION
+
+    def _ask():
+        return claude.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=100,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": (
+                "Say goodnight — you're going to sleep for an hour and won't respond unless someone @mentions you directly. "
+                "Mention that someone can use !wake to wake you up early. "
+                "One or two sentences, stay in character. No hashtags."
+            )}],
+        )
+    response = await asyncio.to_thread(_ask)
+    await ctx.send(response.content[0].text)
+
+
+@bot.command(name="wake")
+async def wake_cmd(ctx: commands.Context):
+    """Wake Ladbot up early from sleep mode."""
+    sleep_until.pop(ctx.channel.id, None)
+    await ctx.send("im up im up")
 
 
 @bot.command(name="rebuildcache")
