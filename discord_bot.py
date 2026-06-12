@@ -840,8 +840,9 @@ async def rebuildcache(ctx: commands.Context):
     await ctx.send("Cache cleared — rebuilding from NHL API, this'll take a minute...")
     try:
         stats = await asyncio.to_thread(hockey_scraper.update_sheet_only)
+        await asyncio.to_thread(hockey_scraper.save_snapshot, stats)
         total_pts = sum(v["pts"] for v in stats["players"].values())
-        await ctx.send(f"Done. Cached {total_pts} total skater points across all games. Run `!updatestats` to push to the sheet.")
+        await ctx.send(f"Done. Cached {total_pts} total skater points across all games. Snapshot updated — tomorrow's delta will be clean.")
     except Exception as e:
         await ctx.send(f"Rebuild failed: {e}")
 
