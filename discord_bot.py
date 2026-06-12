@@ -136,6 +136,35 @@ ACTIVE_WINDOW = 20 * 60  # 20 minutes in seconds
 sleep_until: dict[int, float] = {}
 SLEEP_DURATION = 60 * 60  # 1 hour
 
+# Cached standings summary so hockey questions don't hammer the NHL API
+_standings_cache: dict = {"summary": None, "fetched_at": 0.0}
+_STANDINGS_TTL = 5 * 60  # re-read snapshot file at most every 5 minutes
+_HOCKEY_KEYWORDS = {"hockey", "standing", "pool", "fantasy", "puck", "rank", "playoff"}
+
+
+def _get_standings_summary() -> str | None:
+    """Return a formatted standings string from the morning snapshot (no API call)."""
+    now = time.time()
+    if now - _standings_cache["fetched_at"] < _STANDINGS_TTL and _standings_cache["summary"]:
+        return _standings_cache["summary"]
+    try:
+        snap = hockey_scraper.load_snapshot()
+        if not snap:
+            return None
+        ranked = sorted(snap["fantasy"].items(), key=lambda x: -x[1])
+        ts = snap.get("ts", "")[:16].replace("T", " ")
+        lines = [f"Fantasy hockey standings (as of {ts} ET):"]
+        for i, (team, pts) in enumerate(ranked, 1):
+            gm = hockey_scraper.ROSTERS[team]["gm"]
+            lines.append(f"{i}. {team} ({gm}) — {pts} pts")
+        summary = "\n".join(lines)
+        _standings_cache["summary"] = summary
+        _standings_cache["fetched_at"] = now
+        return summary
+    except Exception as e:
+        print(f"[standings_cache] failed: {e}")
+        return None
+
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -645,12 +674,20 @@ async def on_message(message: discord.Message):
         # Use history for home server, empty context for other servers
         context = histories.get(channel_id, []) if is_home else []
 
+        # Inject live standings when the message is about the hockey pool
+        standings_ctx = ""
+        if any(kw in raw_text.lower() for kw in _HOCKEY_KEYWORDS):
+            standings_summary = await asyncio.to_thread(_get_standings_summary)
+            if standings_summary:
+                standings_ctx = f"\n\n[Live data for this response only — do not repeat in future messages unless asked]\n{standings_summary}"
+
         async with message.channel.typing():
             def _ask():
+                system = SYSTEM_PROMPT + standings_ctx
                 return claude.messages.create(
                     model=CLAUDE_MODEL,
                     max_tokens=1000,
-                    system=SYSTEM_PROMPT,
+                    system=system,
                     messages=context or [{"role": "user", "content": f"[{username}]: {raw_text}"}],
                 )
             response = await asyncio.to_thread(_ask)
