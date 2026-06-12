@@ -761,6 +761,21 @@ async def testchart(ctx: commands.Context, ticker: str = "CNQ.TO"):
         os.remove(chart_path)
 
 
+@bot.command(name="rebuildcache")
+async def rebuildcache(ctx: commands.Context):
+    """Wipe the boxscore cache and rebuild it fresh from the NHL API."""
+    cache_path = os.environ.get("BOXSCORE_CACHE_FILE", "boxscore_cache.json")
+    if os.path.exists(cache_path):
+        os.remove(cache_path)
+    await ctx.send("Cache cleared — rebuilding from NHL API, this'll take a minute...")
+    try:
+        stats = await asyncio.to_thread(hockey_scraper.update_sheet_only)
+        total_pts = sum(v["pts"] for v in stats["players"].values())
+        await ctx.send(f"Done. Cached {total_pts} total skater points across all games. Run `!updatestats` to push to the sheet.")
+    except Exception as e:
+        await ctx.send(f"Rebuild failed: {e}")
+
+
 @bot.command(name="debugstats")
 async def debugstats(ctx: commands.Context):
     """Debug: show goalie wins and cached game count."""

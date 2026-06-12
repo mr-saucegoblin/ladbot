@@ -301,7 +301,7 @@ def _parse_boxscore(game_id, id_to_name):
 
 
 def _get_playoff_games_for_dates(dates):
-    """Fetch game IDs + states for a list of date strings."""
+    """Fetch game IDs + states for a list of date strings. Returns {gid: state}."""
     games = {}
     for date_str in dates:
         data = _get(f"{NHL_BASE}/score/{date_str}")
@@ -316,8 +316,12 @@ def _get_playoff_games_for_dates(dates):
 PLAYOFFS_START = "2026-04-18"
 
 
+CACHE_SETTLE_HOURS = 2  # re-fetch a game until this many hours after first caching it
+
+
 def _update_boxscore_cache(cache, id_to_name):
-    """Fetch any new FINAL games not yet in cache. Returns updated cache."""
+    """Fetch any new FINAL games not yet in cache. Re-fetches recently-cached games until
+    stats settle (NHL API sometimes lags a few minutes after a game goes FINAL)."""
     from datetime import date, timedelta, datetime
     start = datetime.strptime(PLAYOFFS_START, "%Y-%m-%d").date()
     today = datetime.now(ET).date()
@@ -328,13 +332,23 @@ def _update_boxscore_cache(cache, id_to_name):
         current += timedelta(days=1)
     recent_games = _get_playoff_games_for_dates(dates)
 
+    now = datetime.now(ET)
     for gid, state in recent_games.items():
-        if state in ("FINAL", "OFF") and gid not in cache:
-            result = _parse_boxscore(gid, id_to_name)
-            if result:
-                cache[gid] = result
-                logger.info(f"[boxscore] Cached game {gid}")
-            time.sleep(0.5)
+        if state not in ("FINAL", "OFF"):
+            continue
+        existing = cache.get(gid)
+        if existing:
+            cached_at_str = existing.get("cached_at")
+            if cached_at_str:
+                cached_at = datetime.fromisoformat(cached_at_str)
+                if (now - cached_at).total_seconds() > CACHE_SETTLE_HOURS * 3600:
+                    continue  # old enough — trust it
+        result = _parse_boxscore(gid, id_to_name)
+        if result:
+            result["cached_at"] = now.isoformat()
+            cache[gid] = result
+            logger.info(f"[boxscore] {'Updated' if existing else 'Cached'} game {gid}")
+        time.sleep(0.5)
     return cache
 
 
