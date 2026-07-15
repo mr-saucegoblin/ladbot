@@ -624,9 +624,10 @@ async def on_ready():
     weekly_scan.start()
     morning_greeting.start()
     daily_news.start()
-    hockey_schedule_update.start()
-    hockey_morning_recap.start()
-    hockey_live_update.start()
+    # hockey tasks disabled for off-season — re-enable in April
+    # hockey_schedule_update.start()
+    # hockey_morning_recap.start()
+    # hockey_live_update.start()
     job_daily.start()
 
 
