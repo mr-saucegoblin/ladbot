@@ -454,8 +454,8 @@ def _is_finance_adjacent(job: dict) -> bool:
 
 # ── Claude scoring ────────────────────────────────────────────────────────────
 
-def score_job_with_claude(job: dict, client: anthropic.Anthropic) -> tuple[int, str]:
-    """Score a job posting 0-100 against the candidate profile using Claude."""
+def score_job_with_claude(job: dict, client: anthropic.Anthropic) -> tuple[int, str, str]:
+    """Score a job posting 0-100. Returns (score, reason, actual_employer)."""
     prompt = (
         f"You are evaluating a job posting for a specific candidate. "
         f"Score the match from 0 to 100 and give a single-line reason.\n\n"
@@ -466,25 +466,28 @@ def score_job_with_claude(job: dict, client: anthropic.Anthropic) -> tuple[int, 
         f"Location: {job.get('location', '?')}\n"
         f"Description: {(job.get('description') or '')[:1500]}\n\n"
         f"{SCORING_GUIDE}\n"
-        f"Respond in exactly this format (two lines only):\n"
+        f"Respond in exactly this format (three lines only):\n"
         f"SCORE: [0-100]\n"
-        f"REASON: [one sentence]"
+        f"REASON: [one sentence]\n"
+        f"EMPLOYER: [actual hiring company from the description; if not clear use the Company field above]"
     )
     try:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=100,
+            max_tokens=150,
             messages=[{"role": "user", "content": prompt}],
         )
         text = response.content[0].text.strip()
-        score_match = re.search(r"SCORE:\s*(\d+)", text)
-        reason_match = re.search(r"REASON:\s*(.+)", text)
-        score = int(score_match.group(1)) if score_match else 0
-        reason = reason_match.group(1).strip() if reason_match else text[:120]
-        return min(max(score, 0), 100), reason
+        score_match    = re.search(r"SCORE:\s*(\d+)", text)
+        reason_match   = re.search(r"REASON:\s*(.+)", text)
+        employer_match = re.search(r"EMPLOYER:\s*(.+)", text)
+        score    = int(score_match.group(1)) if score_match else 0
+        reason   = reason_match.group(1).strip() if reason_match else text[:120]
+        employer = employer_match.group(1).strip() if employer_match else ""
+        return min(max(score, 0), 100), reason, employer
     except Exception as e:
         print(f"[job_scraper] Claude scoring error: {e}")
-        return 0, "scoring error"
+        return 0, "scoring error", ""
 
 
 # ── Main scrape ───────────────────────────────────────────────────────────────
@@ -492,6 +495,16 @@ def score_job_with_claude(job: dict, client: anthropic.Anthropic) -> tuple[int, 
 def _is_known_url(url: str) -> bool:
     with _conn() as conn:
         return conn.execute("SELECT 1 FROM job_postings WHERE url = ?", (url,)).fetchone() is not None
+
+
+def _is_known_title(title: str) -> bool:
+    """True if a job with this exact title was stored in the last 30 days (catches re-posted duplicates)."""
+    with _conn() as conn:
+        return conn.execute(
+            "SELECT 1 FROM job_postings WHERE lower(title) = lower(?) "
+            "AND first_seen >= datetime('now', '-30 days')",
+            (title.strip(),)
+        ).fetchone() is not None
 
 
 def run_scrape(claude_client: anthropic.Anthropic, include_company_queries: bool = False) -> int:
@@ -508,12 +521,16 @@ def run_scrape(claude_client: anthropic.Anthropic, include_company_queries: bool
             continue
         if _is_known_url(job["url"]):
             continue
-        sc, reason = score_job_with_claude(job, claude_client)
+        if _is_known_title(job["title"]):
+            continue
+        sc, reason, employer = score_job_with_claude(job, claude_client)
         time.sleep(1.5)  # stay under 50 RPM rate limit
         if sc < 50:
             continue
         job["score"] = sc
         job["score_reasons"] = reason
+        if employer:
+            job["company"] = employer
         if _upsert_job(job):
             new_count += 1
     return new_count
