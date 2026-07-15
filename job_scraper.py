@@ -119,6 +119,71 @@ def mark_digest_sent(ids: list[int]):
         conn.executemany("UPDATE job_postings SET digest_sent = 1 WHERE id = ?", [(i,) for i in ids])
 
 
+# ── Workday ───────────────────────────────────────────────────────────────────
+
+WORKDAY_SOURCES = [
+    {"company": "HOOPP",                   "tenant": "hoopp",      "wdn": 10, "board": "HOOPP"},
+    {"company": "Brookfield",              "tenant": "brookfield", "wdn": 5,  "board": "Brookfield"},
+    {"company": "AIMCo",                   "tenant": "aimco",      "wdn": 10, "board": "AIMCoCareers"},
+    {"company": "BCI",                     "tenant": "bci",        "wdn": 10, "board": "BCI_Careers"},
+    {"company": "CDPQ",                    "tenant": "cdpq",       "wdn": 10, "board": "CDPQ"},
+    {"company": "OPTrust",                 "tenant": "optrust",    "wdn": 3,  "board": "OPTrust"},
+    {"company": "Ontario Teachers (OTPP)", "tenant": "otppb",      "wdn": 3,  "board": "OntarioTeachers_Careers"},
+]
+
+_WD_HEADERS = {"Accept": "application/json", "Content-Type": "application/json"}
+
+
+def _fetch_workday_source(source: dict) -> list[dict]:
+    tenant, wdn, board, company = source["tenant"], source["wdn"], source["board"], source["company"]
+    base = f"https://{tenant}.wd{wdn}.myworkdayjobs.com"
+    api  = f"{base}/wday/cxs/{tenant}/{board}/jobs"
+    jobs, offset, limit = [], 0, 20
+    while True:
+        resp = requests.post(api, json={"limit": limit, "offset": offset, "searchText": "", "appliedFacets": {}},
+                             headers=_WD_HEADERS, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        postings = data.get("jobPostings", [])
+        if not postings:
+            break
+        for p in postings:
+            path = p.get("externalPath", "")
+            if not path:
+                continue
+            jobs.append({
+                "source": "workday",
+                "company": company,
+                "title": p.get("title", ""),
+                "location": p.get("locationsText", "") or "",
+                "url": f"{base}{path}",
+                "description": "",
+                "comp_text": "",
+                "comp_value": 0,
+            })
+        offset += limit
+        if offset >= data.get("total", 0):
+            break
+        time.sleep(0.3)
+    return jobs
+
+
+def fetch_workday_jobs() -> list[dict]:
+    all_jobs, seen = [], set()
+    for source in WORKDAY_SOURCES:
+        try:
+            jobs = _fetch_workday_source(source)
+            for job in jobs:
+                if job["url"] not in seen:
+                    seen.add(job["url"])
+                    all_jobs.append(job)
+            print(f"[workday] {source['company']}: {len(jobs)} jobs")
+            time.sleep(1)
+        except Exception as e:
+            print(f"[workday] {source['company']} error: {e}")
+    return all_jobs
+
+
 # ── Fetching ──────────────────────────────────────────────────────────────────
 
 # Broad functional queries — ~20 calls/run, ~40/month (free tier: 250/month)
@@ -432,6 +497,7 @@ def _is_known_url(url: str) -> bool:
 def run_scrape(claude_client: anthropic.Anthropic, include_company_queries: bool = False) -> int:
     """Fetch, score with Claude, store. Returns count of new jobs stored (score >= 50)."""
     all_jobs = fetch_adzuna_jobs(include_company_queries=include_company_queries)
+    all_jobs += fetch_workday_jobs()
     new_count = 0
     for job in all_jobs:
         if not job["url"]:
