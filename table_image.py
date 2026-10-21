@@ -37,24 +37,32 @@ _GRID  = "#2a0a4a"   # dark purple grid
 MONO = "DejaVu Sans Mono"   # ships with matplotlib, so Railway has it too
 SANS = "DejaVu Sans"
 
-# Layout in axis units: x runs 0-100 across the width, y is one unit per row.
-# Keeping everything in these units means the figure can grow with the row count
-# without re-tuning any position.
-X_RANK, X_TICK, X_SEC, X_CAP, X_SCORE, X_CHIP = 2.6, 6.0, 26.0, 34.0, 48.0, 52.0
-ROW_H_INCHES = 0.40
-CHAR_W = 0.78        # width of one monospace character, in x units, at CHIP_FS
-CHIP_FS = 9.5
-# Widest label is 10 characters ("low op mgn"), widest score is 3 ("100"), plus
-# internal padding. Fixed so the three chip columns line up on every row.
-CHIP_W = 14 * CHAR_W + 2.4
-CHIP_GAP = 1.4
+# Layout in axis units: x runs 0-100 across the width, y is one unit per text
+# line. Everything is expressed in these units so the figure can grow with the row
+# count without any position needing to be re-tuned.
+#
+# PORTRAIT ON PURPOSE. The first version was 11.5 x 5.1 inches - a 2.25:1
+# landscape strip. Discord scales an image to the message width, so on a phone
+# that became roughly 400px wide and the 9pt type rendered at about 4pt: legible
+# on a desktop, useless on the device most people read it on. Two lines per pick
+# instead of one trades height, which scrolls, for width, which does not.
+FIG_W_INCHES = 7.0
+LINE_H_INCHES = 0.30
+LINES_PER_PICK = 2.25
+
+X_LEFT, X_RIGHT = 3.0, 97.0
+X_TICK = 9.0
+CHIP_FS = 12.0
+CHIP_GAP = 2.0
+CHIP_W = (X_RIGHT - X_LEFT - 2 * CHIP_GAP) / 3     # three chips fill the width
+CHAR_W = CHIP_W / 17.0                              # 14 chars + padding per chip
 
 
 def _clip(text: str, n: int) -> str:
     """Trim to n characters on a word boundary, with an ellipsis if anything went.
 
     A hard slice produced "Tidewater Midstream and In" and "Doman Building
-    Materials G", which read as typos rather than truncation.
+    Materials G", which read as typos rather than as truncation.
     """
     text = text.strip()
     if len(text) <= n:
@@ -72,34 +80,35 @@ def _chip(ax, slot, y, label, score, helped):
     """
     A rounded pill: trait name on the left, its 0-100 score on the right.
 
-    Every chip is the SAME width, and chips sit in fixed slots rather than being
-    packed end to end. Packing sized each pill to its text, so a short label on one
-    row shifted every chip after it and the columns sagged — the same defect the
-    ANSI table had. A fixed slot costs a little whitespace after "buybacks" and
-    buys a score column you can read straight down.
+    Every chip is the same width and sits in a fixed slot rather than being packed
+    against its neighbour. Packing sized each pill to its text, so a short label
+    shifted every chip after it and the columns sagged - the same defect the ANSI
+    table had. A fixed slot wastes a little space after "buybacks" and buys a score
+    column that reads straight down.
     """
     colour = _CYAN if helped else _PINK
-    x = X_CHIP + slot * (CHIP_W + CHIP_GAP)
+    x = X_LEFT + slot * (CHIP_W + CHIP_GAP)
 
     ax.add_patch(FancyBboxPatch(
-        (x, y - 0.30), CHIP_W, 0.60,
-        boxstyle="round,pad=0.15,rounding_size=0.25",
-        facecolor=colour, alpha=0.13, edgecolor=colour, linewidth=0.9,
+        (x, y - 0.42), CHIP_W, 0.84,
+        boxstyle="round,pad=0.12,rounding_size=0.3",
+        facecolor=colour, alpha=0.13, edgecolor=colour, linewidth=1.0,
         zorder=2,
     ))
-    ax.text(x + 1.0, y, label, color=colour, fontsize=CHIP_FS, fontfamily=MONO,
+    ax.text(x + 1.4, y, label, color=colour, fontsize=CHIP_FS, fontfamily=MONO,
             va="center", ha="left", alpha=0.92, zorder=3)
-    ax.text(x + CHIP_W - 1.0, y, score, color=colour,
-            fontsize=CHIP_FS, fontfamily=MONO, fontweight="bold",
-            va="center", ha="right", zorder=3,
+    ax.text(x + CHIP_W - 1.4, y, score, color=colour, fontsize=CHIP_FS,
+            fontfamily=MONO, fontweight="bold", va="center", ha="right", zorder=3,
             path_effects=_neon(colour, lw=2.5, alpha=0.35))
 
 
 def render(picks, snap, scope, out_path=None) -> str:
     n = len(picks)
-    # 1.75 units of title, n rows, 1.0 of footer.
-    units = n + 2.75
-    fig = plt.figure(figsize=(11.5, units * ROW_H_INCHES), dpi=150)
+    # 2.6 of title, the picks, then 2.3 of footer. The footer needs more room
+    # than its two lines suggest: text is centred on its y, so the last line's
+    # descenders fall below it and clip against the figure edge.
+    units = 2.6 + n * LINES_PER_PICK + 2.3
+    fig = plt.figure(figsize=(FIG_W_INCHES, units * LINE_H_INCHES), dpi=150)
     fig.patch.set_facecolor(_BG)
 
     ax = fig.add_axes([0, 0, 1, 1])
@@ -109,71 +118,63 @@ def render(picks, snap, scope, out_path=None) -> str:
     ax.set_facecolor(_BG)
 
     # ── title ──────────────────────────────────────────────────────────────────
-    ax.text(X_RANK, 0.72, f"▶  LADBOT  —  TOP {n} HOLDINGS",
-            color=_PINK, fontsize=16, fontweight="bold", fontfamily=SANS,
-            va="center", ha="left", path_effects=_neon(_PINK, lw=5, alpha=0.30))
-    ax.text(100 - X_RANK, 0.76, str(snap), color=_TEXT, fontsize=9.5,
-            fontfamily=MONO, va="center", ha="right", alpha=0.65)
+    ax.text(X_LEFT, 0.95, f"▶  LADBOT", color=_PINK, fontsize=19,
+            fontweight="bold", fontfamily=SANS, va="center", ha="left",
+            path_effects=_neon(_PINK, lw=5, alpha=0.30))
+    ax.text(X_RIGHT, 0.95, f"TOP {n}", color=_CYAN, fontsize=15,
+            fontweight="bold", fontfamily=SANS, va="center", ha="right",
+            path_effects=_neon(_CYAN, lw=4, alpha=0.28))
+    ax.text(X_LEFT, 1.75, f"holdings  ·  {snap}  ·  {scope}",
+            color=_TEXT, fontsize=8.5, fontfamily=MONO, va="center", ha="left",
+            alpha=0.6)
+    ax.plot([X_LEFT, X_RIGHT], [2.25] * 2, color=_GRID, linewidth=1.2, zorder=1)
 
-    # ── column headings ────────────────────────────────────────────────────────
-    y_head = 1.72
-    for x, label, ha in ((X_RANK + 1.1, "#", "right"), (X_TICK, "TICKER", "left"),
-                         (X_SEC, "SECTOR", "left"), (X_CAP, "MKT CAP", "left"),
-                         (X_SCORE, "SCORE", "right"),
-                         (X_CHIP, "WHAT DROVE THE SCORE", "left")):
-        ax.text(x, y_head, label, color=_TEXT, fontsize=8, fontfamily=MONO,
-                fontweight="bold", va="center", ha=ha, alpha=0.5)
-    # Just above the first row's band (which starts at 2.45 - 0.42), not through it.
-    ax.plot([X_RANK - 0.6, X_CHIP + 3 * (CHIP_W + CHIP_GAP) - CHIP_GAP],
-            [2.00] * 2, color=_GRID, linewidth=1.1, zorder=1)
-
-    # ── rows ───────────────────────────────────────────────────────────────────
+    # ── one block per pick: identity line, then the chips ──────────────────────
     for i, p in enumerate(picks):
-        y = 2.45 + i
+        y = 3.1 + i * LINES_PER_PICK
 
-        # Alternating band. Low alpha so it separates rows without becoming a
-        # stripe pattern that competes with the chips.
         if i % 2 == 0:
             ax.add_patch(FancyBboxPatch(
-                (X_RANK - 0.6, y - 0.42), 100 - 2 * X_RANK + 1.2, 0.84,
-                boxstyle="round,pad=0,rounding_size=0.12",
+                (X_LEFT - 1.4, y - 0.62), X_RIGHT - X_LEFT + 2.8,
+                LINES_PER_PICK - 0.12,
+                boxstyle="round,pad=0,rounding_size=0.2",
                 facecolor=_PANEL, edgecolor="none", zorder=0,
             ))
 
-        ax.text(X_RANK + 1.1, y, str(p["rank"]), color=_GOLD, fontsize=11,
+        ax.text(X_LEFT + 2.2, y, str(p["rank"]), color=_GOLD, fontsize=12,
                 fontfamily=MONO, fontweight="bold", va="center", ha="right",
                 path_effects=_neon(_GOLD, lw=3, alpha=0.28))
 
         tick = (p["ticker"] or "").removesuffix(".TO")
-        ax.text(X_TICK, y - 0.12, tick, color=_CYAN, fontsize=12.5,
-                fontfamily=MONO, fontweight="bold", va="center", ha="left",
+        ax.text(X_TICK, y, tick, color=_CYAN, fontsize=15, fontfamily=MONO,
+                fontweight="bold", va="center", ha="left",
                 path_effects=_neon(_CYAN, lw=4, alpha=0.30))
-        company = _clip(p.get("company") or "", 28)
-        ax.text(X_TICK, y + 0.26, company, color=_TEXT, fontsize=6.8,
-                fontfamily=SANS, va="center", ha="left", alpha=0.52)
 
         raw = p.get("sector") or ""
-        ax.text(X_SEC, y, qp.SECTOR_CODE.get(raw, raw[:4]), color=_TEXT,
-                fontsize=9, fontfamily=MONO, va="center", ha="left", alpha=0.75)
-
         mc = p.get("market_cap")
         cap = ("—" if not mc else
                f"${float(mc)/1e9:.1f}B" if float(mc) >= 1e9 else
                f"${float(mc)/1e6:.0f}M")
-        ax.text(X_CAP, y, cap, color=_TEXT, fontsize=9, fontfamily=MONO,
-                va="center", ha="left", alpha=0.75)
+        meta = (f"{_clip(p.get('company') or '', 22)}  ·  "
+                f"{qp.SECTOR_CODE.get(raw, raw[:4])}  ·  {cap}")
+        ax.text(X_TICK + 11.0, y + 0.06, meta, color=_TEXT, fontsize=8,
+                fontfamily=SANS, va="center", ha="left", alpha=0.6)
 
-        ax.text(X_SCORE, y, f"{float(p['score']):+.2f}", color=_GOLD, fontsize=10.5,
-                fontfamily=MONO, fontweight="bold", va="center", ha="right",
-                alpha=0.92)
+        ax.text(X_RIGHT, y, f"{float(p['score']):+.2f}", color=_GOLD,
+                fontsize=13, fontfamily=MONO, fontweight="bold",
+                va="center", ha="right", alpha=0.95)
 
         for slot, c in enumerate(qp.driver_chips(p, 3)):
-            _chip(ax, slot, y, c["label"], c["score"], c["helped"])
+            _chip(ax, slot, y + 1.12, c["label"], c["score"], c["helped"])
 
     # ── footer ─────────────────────────────────────────────────────────────────
-    ax.text(X_RANK, units - 0.55,
-            f"{scope}   ·   chip score = how strongly it shows that trait "
-            f"(0-100 vs sector)   ·   cyan helped, pink hurt   ·   not advice",
+    ax.text(X_LEFT, units - 1.55,
+            "chip score = how strongly it shows that trait, 0-100 vs sector",
+            color=_TEXT, fontsize=7.5, fontfamily=MONO, va="center", ha="left",
+            alpha=0.45)
+    ax.text(X_LEFT, units - 0.95,
+            "cyan helped the score  ·  pink hurt it  ·  "
+            "statistical ranking, not advice",
             color=_TEXT, fontsize=7.5, fontfamily=MONO, va="center", ha="left",
             alpha=0.45)
 

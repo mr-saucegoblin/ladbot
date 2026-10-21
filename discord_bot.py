@@ -744,65 +744,45 @@ async def picks(ctx: commands.Context, count: int = 5):
     # Past five names, a table beats a thread: one scannable message instead of ten
     # paragraphs and ten charts. The short reasons come straight off the stored SHAP
     # values, so the table needs no model call and returns instantly.
-    if count > 5:
-        payload, error = await asyncio.to_thread(quant_picks.build_table_embed, count)
-        if error:
-            await ctx.send(error)
-            return
-
-        # Preferred path: a rendered PNG in the same synthwave style as the price
-        # charts. A code block gets eight ANSI colours and one font, which is why
-        # the text version always looked like a terminal sitting next to the
-        # charts rather than part of the same post.
-        #
-        # The ANSI embed below is the fallback, not a lesser option: it is the
-        # version whose numbers can be copied and read by a screen reader, so a
-        # render failure degrades to something still usable rather than to nothing.
-        try:
-            img, img_err = await asyncio.to_thread(table_image.render_latest, count)
-            if img and not img_err:
-                embed = discord.Embed(
-                    title=payload["title"], colour=payload["color"])
-                embed.set_image(url="attachment://picks.png")
-                embed.set_footer(text=payload["footer"])
-                try:
-                    await ctx.send(embed=embed,
-                                   file=discord.File(img, filename="picks.png"))
-                finally:
-                    os.remove(img)
-                return
-        except Exception as e:
-            print(f"[picks] table image failed, falling back to text: {e}")
-        # An embed rather than a bare message: it carries a coloured border, a real
-        # title and small-type footer, so the footnote stops competing with the data.
-        # The body is a ```ansi fence, which Discord renders with actual colour.
-        embed = discord.Embed(
-            title=payload["title"],
-            description=payload["body"],
-            colour=payload["color"],
-        )
-        embed.set_footer(text=payload["footer"])
-        await ctx.send(embed=embed)
-        return
-
-    await ctx.send(f"Pulling the model's top {count}...")
-    posts, tickers, error = await asyncio.to_thread(quant_picks.build_posts, count)
+    payload, error = await asyncio.to_thread(quant_picks.build_table_embed, count)
     if error:
         await ctx.send(error)
         return
 
-    # posts[0] is the header; posts[1:] pair with tickers for the charts, matching
-    # how the Friday thematic thread is laid out.
-    for i, post in enumerate(posts):
-        text = f"{_SEP}\n{post}" if i > 0 else post
-        await _send_long(ctx.channel, text)
-        if i > 0 and (i - 1) < len(tickers):
-            chart_path = await asyncio.to_thread(generate_chart, tickers[i - 1])
-            if chart_path:
-                try:
-                    await ctx.channel.send(file=discord.File(chart_path))
-                finally:
-                    os.remove(chart_path)
+    # Preferred path: a rendered PNG in the same synthwave style as the price
+    # charts. A code block gets eight ANSI colours and one font, which is why
+    # the text version always looked like a terminal sitting next to the
+    # charts rather than part of the same post.
+    #
+    # The ANSI embed below is the fallback, not a lesser option: it is the
+    # version whose numbers can be copied and read by a screen reader, so a
+    # render failure degrades to something still usable rather than to nothing.
+    try:
+        img, img_err = await asyncio.to_thread(table_image.render_latest, count)
+        if img and not img_err:
+            embed = discord.Embed(
+                title=payload["title"], colour=payload["color"])
+            embed.set_image(url="attachment://picks.png")
+            embed.set_footer(text=payload["footer"])
+            try:
+                await ctx.send(embed=embed,
+                               file=discord.File(img, filename="picks.png"))
+            finally:
+                os.remove(img)
+            return
+    except Exception as e:
+        print(f"[picks] table image failed, falling back to text: {e}")
+    # An embed rather than a bare message: it carries a coloured border, a real
+    # title and small-type footer, so the footnote stops competing with the data.
+    # The body is a ```ansi fence, which Discord renders with actual colour.
+    embed = discord.Embed(
+        title=payload["title"],
+        description=payload["body"],
+        colour=payload["color"],
+    )
+    embed.set_footer(text=payload["footer"])
+    await ctx.send(embed=embed)
+    return
 
 
 @bot.command(name="testscan")
