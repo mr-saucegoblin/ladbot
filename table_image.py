@@ -89,17 +89,23 @@ def _chip(ax, slot, y, label, score, helped):
     colour = _CYAN if helped else _PINK
     x = X_LEFT + slot * (CHIP_W + CHIP_GAP)
 
+    # No outline, and no glow on the score.
+    #
+    # A 1px stroke around a small pill reads as a cheap border rather than as neon:
+    # at this size the line is the same visual weight as the text inside it, so the
+    # eye sees ten boxes before it sees any data. A slightly stronger fill with no
+    # edge gives the same separation and stays quiet. Likewise the withStroke halo
+    # that works on a 15pt ticker just looks like blur on a 12pt number, so the
+    # glow is reserved for the large type where it reads as intended.
     ax.add_patch(FancyBboxPatch(
         (x, y - 0.42), CHIP_W, 0.84,
         boxstyle="round,pad=0.12,rounding_size=0.3",
-        facecolor=colour, alpha=0.13, edgecolor=colour, linewidth=1.0,
-        zorder=2,
+        facecolor=colour, alpha=0.16, edgecolor="none", zorder=2,
     ))
     ax.text(x + 1.4, y, label, color=colour, fontsize=CHIP_FS, fontfamily=MONO,
-            va="center", ha="left", alpha=0.92, zorder=3)
+            va="center", ha="left", alpha=0.85, zorder=3)
     ax.text(x + CHIP_W - 1.4, y, score, color=colour, fontsize=CHIP_FS,
-            fontfamily=MONO, fontweight="bold", va="center", ha="right", zorder=3,
-            path_effects=_neon(colour, lw=2.5, alpha=0.35))
+            fontfamily=MONO, fontweight="bold", va="center", ha="right", zorder=3)
 
 
 def render(picks, snap, scope, out_path=None) -> str:
@@ -155,7 +161,11 @@ def render(picks, snap, scope, out_path=None) -> str:
         cap = ("—" if not mc else
                f"${float(mc)/1e9:.1f}B" if float(mc) >= 1e9 else
                f"${float(mc)/1e6:.0f}M")
-        meta = (f"{_clip(p.get('company') or '', 22)}  ·  "
+        # The meta line runs from the ticker to the score. At 8pt sans in a 1050px
+        # render that is about 78 characters, of which the sector and market cap
+        # take roughly 14 - so the company name can have the rest. It was clipped
+        # at 22, which truncated six of ten names that fitted comfortably.
+        meta = (f"{_clip(p.get('company') or '', 46)}  ·  "
                 f"{qp.SECTOR_CODE.get(raw, raw[:4])}  ·  {cap}")
         ax.text(X_TICK + 11.0, y + 0.06, meta, color=_TEXT, fontsize=8,
                 fontfamily=SANS, va="center", ha="left", alpha=0.6)
