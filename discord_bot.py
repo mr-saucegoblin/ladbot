@@ -35,6 +35,7 @@ from tweet_generator import generate_thread
 from chart_generator import generate_chart
 import hockey_scraper
 import job_scraper
+import quant_picks
 
 load_dotenv()
 
@@ -621,6 +622,14 @@ async def on_ready():
         job_scraper.init_db()
     except Exception as e:
         print(f"[on_ready] job DB init failed: {e}")
+    # DEV_MODE lets a second instance run locally alongside the deployed one
+    # without duplicating automated posts. Commands still work — those only fire
+    # when someone asks — but the scheduled loops stay off, so the main server
+    # doesn't get two Friday scans or two job digests.
+    if os.getenv("DEV_MODE"):
+        print("DEV_MODE — scheduled tasks NOT started (commands still active)")
+        return
+
     weekly_scan.start()
     morning_greeting.start()
     daily_news.start()
@@ -718,6 +727,45 @@ async def scan(ctx: commands.Context):
 
     await ctx.send(f"Scan complete — posting {len(posts)} updates.")
     await _send_posts_with_charts(ctx.channel, posts, theme_picks)
+
+
+@bot.command(name="picks")
+async def picks(ctx: commands.Context, count: int = 5):
+    """Post the quant model's latest ranked picks, with a chart for each."""
+    # Replies wherever it is invoked — ctx.channel, not a fixed channel ID — so the
+    # same command serves the test server and the main one without a second variant.
+    #
+    # The pipeline takes tens of minutes, so nothing is computed here — this reads
+    # whatever the last `9_score.py --save` published. Everyone asking on the same
+    # day therefore gets the same list from the same timestamped row.
+    count = max(1, min(count, 25))
+
+    # Past five names, a table beats a thread: one scannable message instead of ten
+    # paragraphs and ten charts. The short reasons come straight off the stored SHAP
+    # values, so the table needs no model call and returns instantly.
+    if count > 5:
+        table, error = await asyncio.to_thread(quant_picks.build_table, count)
+        await ctx.send(error or table)
+        return
+
+    await ctx.send(f"Pulling the model's top {count}...")
+    posts, tickers, error = await asyncio.to_thread(quant_picks.build_posts, count)
+    if error:
+        await ctx.send(error)
+        return
+
+    # posts[0] is the header; posts[1:] pair with tickers for the charts, matching
+    # how the Friday thematic thread is laid out.
+    for i, post in enumerate(posts):
+        text = f"{_SEP}\n{post}" if i > 0 else post
+        await _send_long(ctx.channel, text)
+        if i > 0 and (i - 1) < len(tickers):
+            chart_path = await asyncio.to_thread(generate_chart, tickers[i - 1])
+            if chart_path:
+                try:
+                    await ctx.channel.send(file=discord.File(chart_path))
+                finally:
+                    os.remove(chart_path)
 
 
 @bot.command(name="testscan")

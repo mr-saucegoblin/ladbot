@@ -4,3 +4,27 @@ __pycache__/
 *.db
 !ladbot.db
 chat_history.json
+quant/exports/
+
+# Google service-account keys. hockey-384215-*.json holds a live private key and
+# was sitting untracked one `git add .` away from a public repo.
+hockey-*.json
+*-service-account*.json
+service-account*.json
+
+# Runtime caches, rebuilt on demand
+boxscore_cache.json
+hockey_snapshot.json
+hockey_player_ids.json
+
+# Quant data artifacts. The pipeline regenerates all of these, and quant/ is 37MB
+# of parquet and CSV that Railway never reads — quant_picks.py queries the
+# predictions table directly.
+quant/*.parquet
+quant/*.csv
+quant/*.png
+quant/*.json
+!quant/cdr_exclusions.txt
+
+# Claude Code session state
+.claude/

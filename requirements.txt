@@ -3,10 +3,18 @@ discord.py
 feedparser
 gspread
 google-auth
+lightgbm
 matplotlib
 numpy
-pandas
+# Pinned to the major version: pandas 3.0 changed .dt.date to return datetime64
+# rather than object when a column is entirely NULL, which broke a date comparison
+# in 6_feature_compute.py. An unpinned major bump is how that arrived.
+pandas>=3.0,<4.0
+pyarrow
 openpyxl
 psycopg2-binary
 python-dotenv
 requests
+scikit-learn
+seaborn
+tqdm
