@@ -491,6 +491,90 @@ def universe_size(snap) -> int | None:
         return None
 
 
+# Discord renders a fenced block tagged `ansi` with real SGR colours. The palette
+# deliberately echoes the chart palette: cyan for what helped, gold for rank, grey
+# for scaffolding. Only codes 30-37 exist, so these are the closest Discord can get
+# to #00f5ff and #ffd700.
+ANSI = {
+    "reset": "\u001b[0m",
+    "rank":  "\u001b[0;33m",   # gold-ish
+    "tick":  "\u001b[1;36m",   # bright cyan, bold
+    "sec":   "\u001b[0;30m",   # grey, recedes
+    "label": "\u001b[0;37m",   # plain white
+    "score": "\u001b[0;36m",   # cyan - the number that carries the meaning
+    "dim":   "\u001b[0;30m",   # header and separators
+    "down":  "\u001b[0;31m",   # red, for a driver that hurt
+}
+
+
+def _c(key: str, text: str) -> str:
+    """
+    Wrap text in one SGR colour.
+
+    The escapes are invisible but still count toward Discord's message limit, which
+    is why this goes in an embed description (4096 chars) rather than a plain
+    message (2000). Ten coloured rows run about 1,400 characters.
+    """
+    return f"{ANSI[key]}{text}{ANSI['reset']}"
+
+
+def _helped_ansi(pick: dict, n: int = 2) -> str:
+    """Same content as _helped(), with the score coloured so the eye lands on it."""
+    d = pick.get("drivers") or {}
+    if isinstance(d, str):
+        d = json.loads(d)
+    pos = sorted((d.get("positive") or []),
+                 key=lambda x: -abs(x.get("contribution", 0)))[:n]
+    if not pos:
+        return _c("dim", "-")
+    bits = []
+    for item in pos:
+        label, score = _directional(item["feature"], item.get("percentile"))
+        bits.append(f"{_c('label', label)} {_c('score', score)}")
+    return _c("dim", " \u00b7 ").join(bits)
+
+
+def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
+    """
+    The same table as build_table(), coloured and shaped for a Discord embed.
+
+    Plain text in a code fence is legible but flat - ten rows of identical grey
+    under a heavy rule. An embed adds a coloured left border, a real title and a
+    small-type footer, and the `ansi` fence lets the ticker and the score carry the
+    chart palette. The header rule is gone: the embed border already separates the
+    block from the conversation, so the rule was only adding weight.
+
+    Returns a payload for the caller to turn into discord.Embed, so this module
+    needs no discord.py import and stays testable from a terminal.
+    """
+    picks, snap = load_latest_picks(n)
+    if not picks:
+        return None, ("No scored picks yet - run `9_score.py --save` "
+                      "to publish a snapshot.")
+
+    rows = [_c("dim", f"{'#':>2}  {'TICKER':<8}{'SEC':<6}WHAT HELPED")]
+    for p in picks:
+        tick = (p["ticker"] or "").removesuffix(".TO")[:7]
+        raw = p.get("sector") or ""
+        sec = SECTOR_CODE.get(raw, raw[:4])
+        rows.append(
+            f"{_c('rank', format(p['rank'], '>2'))}  "
+            f"{_c('tick', format(tick, '<8'))}"
+            f"{_c('sec', format(sec, '<6'))}"
+            f"{_helped_ansi(p)}"
+        )
+
+    size = universe_size(snap)
+    scope = f"ranked {size} TSX names" if size else "TSX main board"
+    return {
+        "title": f"LadBot \u2014 Top {len(picks)} Holdings",
+        "body": "```ansi\n" + "\n".join(rows) + "\n```",
+        "footer": (f"{snap}  \u00b7  {scope}  \u00b7  score = how strongly it "
+                   f"shows that trait (0-100 vs sector)  \u00b7  not advice"),
+        "color": 0x00F5FF,
+    }, None
+
+
 def build_table(n: int = 10) -> tuple[str | None, str | None]:
     """
     A compact monospace table - one message instead of ten posts and ten charts.

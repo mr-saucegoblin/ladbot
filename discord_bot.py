@@ -744,8 +744,20 @@ async def picks(ctx: commands.Context, count: int = 5):
     # paragraphs and ten charts. The short reasons come straight off the stored SHAP
     # values, so the table needs no model call and returns instantly.
     if count > 5:
-        table, error = await asyncio.to_thread(quant_picks.build_table, count)
-        await ctx.send(error or table)
+        payload, error = await asyncio.to_thread(quant_picks.build_table_embed, count)
+        if error:
+            await ctx.send(error)
+            return
+        # An embed rather than a bare message: it carries a coloured border, a real
+        # title and small-type footer, so the footnote stops competing with the data.
+        # The body is a ```ansi fence, which Discord renders with actual colour.
+        embed = discord.Embed(
+            title=payload["title"],
+            description=payload["body"],
+            colour=payload["color"],
+        )
+        embed.set_footer(text=payload["footer"])
+        await ctx.send(embed=embed)
         return
 
     await ctx.send(f"Pulling the model's top {count}...")
