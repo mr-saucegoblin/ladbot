@@ -36,6 +36,7 @@ from chart_generator import generate_chart
 import hockey_scraper
 import job_scraper
 import quant_picks
+import table_image
 
 load_dotenv()
 
@@ -748,6 +749,30 @@ async def picks(ctx: commands.Context, count: int = 5):
         if error:
             await ctx.send(error)
             return
+
+        # Preferred path: a rendered PNG in the same synthwave style as the price
+        # charts. A code block gets eight ANSI colours and one font, which is why
+        # the text version always looked like a terminal sitting next to the
+        # charts rather than part of the same post.
+        #
+        # The ANSI embed below is the fallback, not a lesser option: it is the
+        # version whose numbers can be copied and read by a screen reader, so a
+        # render failure degrades to something still usable rather than to nothing.
+        try:
+            img, img_err = await asyncio.to_thread(table_image.render_latest, count)
+            if img and not img_err:
+                embed = discord.Embed(
+                    title=payload["title"], colour=payload["color"])
+                embed.set_image(url="attachment://picks.png")
+                embed.set_footer(text=payload["footer"])
+                try:
+                    await ctx.send(embed=embed,
+                                   file=discord.File(img, filename="picks.png"))
+                finally:
+                    os.remove(img)
+                return
+        except Exception as e:
+            print(f"[picks] table image failed, falling back to text: {e}")
         # An embed rather than a bare message: it carries a coloured border, a real
         # title and small-type footer, so the footnote stops competing with the data.
         # The body is a ```ansi fence, which Discord renders with actual colour.
