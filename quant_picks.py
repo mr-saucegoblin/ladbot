@@ -491,19 +491,28 @@ def universe_size(snap) -> int | None:
         return None
 
 
-# Discord renders a fenced block tagged `ansi` with real SGR colours. The palette
-# deliberately echoes the chart palette: cyan for what helped, gold for rank, grey
-# for scaffolding. Only codes 30-37 exist, so these are the closest Discord can get
-# to #00f5ff and #ffd700.
+# Discord renders a fenced block tagged `ansi` with real SGR colour, which is the
+# only way to get the chart palette into a chat message.
+#
+# chart_generator.py           nearest SGR code
+#   CYAN  #00f5ff      ->      36 (bold 1;36 for the brighter neon)
+#   PINK  #ff2d78      ->      35  magenta - the signature synthwave accent
+#   GOLD  #ffd700      ->      33
+#   GRID  #2a0a4a      ->      30  grey, for anything that should recede
+#
+# Only 30-37 exist, so these are approximations, but the cyan/magenta pairing is
+# what makes the charts read as synthwave and it survives the translation. The
+# layout alternates them: pink names the trait, cyan gives the number.
 ANSI = {
-    "reset": "\u001b[0m",
-    "rank":  "\u001b[0;33m",   # gold-ish
-    "tick":  "\u001b[1;36m",   # bright cyan, bold
-    "sec":   "\u001b[0;30m",   # grey, recedes
-    "label": "\u001b[0;37m",   # plain white
-    "score": "\u001b[0;36m",   # cyan - the number that carries the meaning
-    "dim":   "\u001b[0;30m",   # header and separators
-    "down":  "\u001b[0;31m",   # red, for a driver that hurt
+    "reset":  "\u001b[0m",
+    "header": "\u001b[0;35m",   # pink column headings
+    "rank":   "\u001b[0;33m",   # gold numerals
+    "tick":   "\u001b[1;36m",   # bright cyan, bold - the loudest thing on the row
+    "sec":    "\u001b[0;30m",   # grey, recedes
+    "label":  "\u001b[0;35m",   # pink - the trait name
+    "score":  "\u001b[1;36m",   # bright cyan - the number that carries the meaning
+    "dim":    "\u001b[0;30m",   # separators
+    "down":   "\u001b[0;31m",   # red, for a driver that hurt
 }
 
 
@@ -552,7 +561,7 @@ def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
         return None, ("No scored picks yet - run `9_score.py --save` "
                       "to publish a snapshot.")
 
-    rows = [_c("dim", f"{'#':>2}  {'TICKER':<8}{'SEC':<6}WHAT HELPED")]
+    rows = [_c("header", f"{'#':>2}  {'TICKER':<8}{'SEC':<6}WHAT HELPED")]
     for p in picks:
         tick = (p["ticker"] or "").removesuffix(".TO")[:7]
         raw = p.get("sector") or ""
@@ -571,7 +580,8 @@ def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
         "body": "```ansi\n" + "\n".join(rows) + "\n```",
         "footer": (f"{snap}  \u00b7  {scope}  \u00b7  score = how strongly it "
                    f"shows that trait (0-100 vs sector)  \u00b7  not advice"),
-        "color": 0x00F5FF,
+        # Pink border against cyan-and-pink content: the two-tone the charts use.
+        "color": 0xFF2D78,
     }, None
 
 
