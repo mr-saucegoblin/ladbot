@@ -495,63 +495,94 @@ def universe_size(snap) -> int | None:
 # only way to get the chart palette into a chat message.
 #
 # chart_generator.py           nearest SGR code
-#   CYAN  #00f5ff      ->      36 (bold 1;36 for the brighter neon)
+#   CYAN  #00f5ff      ->      36
 #   PINK  #ff2d78      ->      35  magenta - the signature synthwave accent
 #   GOLD  #ffd700      ->      33
 #   GRID  #2a0a4a      ->      30  grey, for anything that should recede
 #
-# Only 30-37 exist, so these are approximations, but the cyan/magenta pairing is
-# what makes the charts read as synthwave and it survives the translation. The
-# layout alternates them: pink names the trait, cyan gives the number.
+# NO BOLD. The "1;" prefix is deliberately absent everywhere. Discord renders bold
+# glyphs wider than regular ones in the code-block font, so a bold column and a
+# regular column of the same character count do not occupy the same width, and the
+# table visibly drifts out of alignment down the page.
 ANSI = {
     "reset":  "\u001b[0m",
-    "header": "\u001b[0;35m",   # pink column headings
+    "header": "\u001b[0;30m",   # grey headings - the data should be the loud part
     "rank":   "\u001b[0;33m",   # gold numerals
-    "tick":   "\u001b[1;36m",   # bright cyan, bold - the loudest thing on the row
+    "tick":   "\u001b[0;36m",   # cyan
     "sec":    "\u001b[0;30m",   # grey, recedes
     "label":  "\u001b[0;35m",   # pink - the trait name
-    "score":  "\u001b[1;36m",   # bright cyan - the number that carries the meaning
+    "score":  "\u001b[0;36m",   # cyan - the number that carries the meaning
     "dim":    "\u001b[0;30m",   # separators
     "down":   "\u001b[0;31m",   # red, for a driver that hurt
 }
+
+# Column widths, in characters. Every row - including the header - is built from
+# these same constants by _row(), so the header cannot drift away from the data the
+# way it did when the two were formatted independently.
+W_RANK, W_TICK, W_SEC, W_LABEL, W_SCORE = 2, 7, 5, 10, 3
 
 
 def _c(key: str, text: str) -> str:
     """
     Wrap text in one SGR colour.
 
-    The escapes are invisible but still count toward Discord's message limit, which
-    is why this goes in an embed description (4096 chars) rather than a plain
-    message (2000). Ten coloured rows run about 1,400 characters.
+    Padding goes INSIDE the wrapper, so callers pad first and colour second; that
+    keeps the escape sequences out of the width arithmetic entirely. The escapes
+    are invisible but still count toward the message limit, which is why this goes
+    in an embed description (4096) rather than a plain message (2000).
     """
     return f"{ANSI[key]}{text}{ANSI['reset']}"
 
 
-def _helped_ansi(pick: dict, n: int = 2) -> str:
-    """Same content as _helped(), with the score coloured so the eye lands on it."""
+def _cell(pick_item) -> tuple[str, str]:
+    """One driver as (label, score) strings, already padded to column width."""
+    if pick_item is None:
+        return " " * W_LABEL, " " * W_SCORE
+    label, score = _directional(pick_item["feature"], pick_item.get("percentile"))
+    return f"{label[:W_LABEL]:<{W_LABEL}}", f"{score:>{W_SCORE}}"
+
+
+def _row(rank: str, tick: str, sec: str, cells, colour: bool) -> str:
+    """
+    Build one line. Used for the header and every data row, so the columns are
+    defined in exactly one place.
+
+    `cells` is a list of (label, score) pairs already padded by _cell(). Scores are
+    right-aligned inside their own column rather than trailing the label, which is
+    what makes the numbers form a readable column instead of scattering.
+    """
+    parts = [
+        _c("rank", rank) if colour else rank,
+        "  ",
+        _c("tick", tick) if colour else tick,
+        _c("sec", sec) if colour else sec,
+    ]
+    for i, (label, score) in enumerate(cells):
+        if i:
+            parts.append("  ")
+        parts.append(_c("label", label) if colour else label)
+        parts.append(" ")
+        parts.append(_c("score", score) if colour else score)
+    return "".join(parts)
+
+
+def _driver_cells(pick: dict, n: int = 2):
     d = pick.get("drivers") or {}
     if isinstance(d, str):
         d = json.loads(d)
     pos = sorted((d.get("positive") or []),
                  key=lambda x: -abs(x.get("contribution", 0)))[:n]
-    if not pos:
-        return _c("dim", "-")
-    bits = []
-    for item in pos:
-        label, score = _directional(item["feature"], item.get("percentile"))
-        bits.append(f"{_c('label', label)} {_c('score', score)}")
-    return _c("dim", " \u00b7 ").join(bits)
+    pos += [None] * (n - len(pos))
+    return [_cell(x) for x in pos]
 
 
 def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
     """
-    The same table as build_table(), coloured and shaped for a Discord embed.
+    The same table as build_table(), coloured and column-aligned for an embed.
 
-    Plain text in a code fence is legible but flat - ten rows of identical grey
-    under a heavy rule. An embed adds a coloured left border, a real title and a
-    small-type footer, and the `ansi` fence lets the ticker and the score carry the
-    chart palette. The header rule is gone: the embed border already separates the
-    block from the conversation, so the rule was only adding weight.
+    Three things keep it aligned where the first version drifted: no bold anywhere,
+    one _row() builder shared by the header and the data, and fixed-width driver
+    cells with right-aligned scores instead of free text joined by a separator.
 
     Returns a payload for the caller to turn into discord.Embed, so this module
     needs no discord.py import and stays testable from a terminal.
@@ -561,17 +592,16 @@ def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
         return None, ("No scored picks yet - run `9_score.py --save` "
                       "to publish a snapshot.")
 
-    rows = [_c("header", f"{'#':>2}  {'TICKER':<8}{'SEC':<6}WHAT HELPED")]
+    head = _row(f"{'#':>{W_RANK}}", f"{'TICKER':<{W_TICK}}", f"{'SEC':<{W_SEC}}",
+                [(f"{'WHAT HELPED':<{W_LABEL}}", " " * W_SCORE),
+                 (f"{'':<{W_LABEL}}", " " * W_SCORE)], colour=False)
+    rows = [_c("header", head.rstrip())]
     for p in picks:
-        tick = (p["ticker"] or "").removesuffix(".TO")[:7]
+        tick = (p["ticker"] or "").removesuffix(".TO")[:W_TICK]
         raw = p.get("sector") or ""
         sec = SECTOR_CODE.get(raw, raw[:4])
-        rows.append(
-            f"{_c('rank', format(p['rank'], '>2'))}  "
-            f"{_c('tick', format(tick, '<8'))}"
-            f"{_c('sec', format(sec, '<6'))}"
-            f"{_helped_ansi(p)}"
-        )
+        rows.append(_row(f"{p['rank']:>{W_RANK}}", f"{tick:<{W_TICK}}",
+                         f"{sec:<{W_SEC}}", _driver_cells(p, 2), colour=True))
 
     size = universe_size(snap)
     scope = f"ranked {size} TSX names" if size else "TSX main board"
@@ -580,7 +610,6 @@ def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
         "body": "```ansi\n" + "\n".join(rows) + "\n```",
         "footer": (f"{snap}  \u00b7  {scope}  \u00b7  score = how strongly it "
                    f"shows that trait (0-100 vs sector)  \u00b7  not advice"),
-        # Pink border against cyan-and-pink content: the two-tone the charts use.
         "color": 0xFF2D78,
     }, None
 
