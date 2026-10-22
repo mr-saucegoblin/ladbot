@@ -38,6 +38,8 @@ warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
 
+import matplotlib
+matplotlib.use("Agg")  # no display on Railway; must precede the pyplot import
 import matplotlib.pyplot as plt
 import seaborn as sns
 

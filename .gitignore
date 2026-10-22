@@ -24,6 +24,7 @@ quant/*.parquet
 quant/*.csv
 quant/*.png
 quant/*.json
+quant/quant_model.txt
 !quant/cdr_exclusions.txt
 
 # Claude Code session state

@@ -8,14 +8,19 @@ bad input. A subprocess gives each one its own memory that is definitely returne
 when it ends, and a non-zero exit code to check, and means a SystemExit in step 3
 cannot take the Discord bot down with it.
 
-The weekly run deliberately skips 7_eda.py and 8_model.py:
+The weekly run includes 7_eda.py but skips 8_model.py.
 
-  * 8_model.py only evaluates. It reports how good the model is, which does not
-    change because a week of prices arrived.
-  * 9_score.py trains its own model from quant_clean.parquet, so 7_eda.py only
-    needs re-running when the feature set or the training window changes.
+8_model.py only evaluates - it reports how good the model is, which does not
+change because a week of prices arrived. Run it by hand when you want to know
+whether a change helped.
 
-Re-run those two by hand monthly, or whenever features change.
+7_eda.py has to run, though skipping it is tempting: it takes a minute and
+9_score.py appears not to need it. It does. 9_score.py trains its own model from
+quant_clean.parquet, and that file is a build artifact that git ignores, so on a
+fresh checkout - which is exactly what Railway deploys - it does not exist. Only
+7_eda.py produces it. Rebuilding it weekly also means the model trains on data
+that includes the snapshot just computed, rather than on whatever was in the
+parquet when someone last ran it locally.
 
 Usage:
     python pipeline_runner.py                 # full weekly run
@@ -44,6 +49,8 @@ STEPS = [
      "Piotroski and Altman"),
     (["6_feature_compute.py", "--as-of", "{as_of}", "--new-only"], 5400,
      "features for the new snapshot"),
+    (["7_eda.py"], 900,
+     "rebuild quant_clean.parquet"),
     (["9_score.py", "--date", "{as_of}", "--save", "--top", "10"], 2700,
      "score and publish picks"),
 ]
