@@ -478,53 +478,6 @@ async def weekly_scan():
     await _send_posts_with_charts(channel, posts, theme_picks)
 
 
-async def fetch_history_fact() -> str:
-    """Fetch a 'this day in history' fact from Wikipedia. Returns empty string on failure."""
-    now = datetime.datetime.now(ET)
-    url = f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{now.month}/{now.day}"
-    def _get():
-        try:
-            r = requests.get(url, timeout=5, headers={"User-Agent": "Ladbot/1.0"})
-            if not r.ok:
-                return ""
-            events = r.json().get("events", [])
-            if not events:
-                return ""
-            event = random.choice(events)
-            return f"On this day in {event['year']}, {event['text']}"
-        except Exception as e:
-            print(f"[history_fact] failed: {e}")
-            return ""
-    return await asyncio.to_thread(_get)
-
-
-@tasks.loop(time=datetime.time(hour=8, minute=30, tzinfo=ZoneInfo("America/Toronto")))
-async def morning_greeting():
-    """Post a good morning message every weekday at 9 AM ET."""
-    channel_id = int(os.getenv("SCAN_CHANNEL_ID", 0))
-    channel = bot.get_channel(channel_id)
-    if not channel:
-        return
-    day = datetime.datetime.now(ET).strftime("%A")
-    lad = random.choice(list(USERNAME_MAP.values()))
-    history_fact = await fetch_history_fact()
-    fact_line = f' Include a "this day in history" callout using this fact - give it a proper sentence or two, make it sound like you just remembered it, and relate it to one of the lads or something they\'d do: "{history_fact}"' if history_fact else ""
-    def _ask():
-        return claude.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=350,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": (
-                f"It's {day} morning. Write a short good morning message to the lads (3-4 sentences max). "
-                f"Make sure to reference {lad} specifically. "
-                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, Wednesday hump day, etc). "
-                f"No hashtags.{fact_line}"
-            )}],
-        )
-    response = await asyncio.to_thread(_ask)
-    await channel.send(response.content[0].text)
-
-
 async def _build_daily_news_summary() -> tuple[str, int] | None:
     """Fetch last 24h headlines and ask Claude to summarize the top 5. Returns (summary, article_count) or None on failure."""
     def _blocking():
@@ -632,7 +585,6 @@ async def on_ready():
         return
 
     weekly_scan.start()
-    morning_greeting.start()
     daily_news.start()
     # hockey tasks disabled for off-season — re-enable in April
     # hockey_schedule_update.start()
@@ -803,35 +755,6 @@ async def testscan(ctx: commands.Context):
     if recap:
         await channel.send(recap)
     await _send_posts_with_charts(channel, posts, theme_picks)
-
-
-@bot.command(name="testmorning")
-async def testmorning(ctx: commands.Context):
-    """Test the morning greeting — always posts to the test channel."""
-    TEST_CHANNEL_ID = 891720029861732356
-    channel = bot.get_channel(TEST_CHANNEL_ID)
-    if not channel:
-        await ctx.send("Test channel not found.")
-        return
-    await ctx.send(f"Morning greeting will post in <#{TEST_CHANNEL_ID}>...")
-    day = datetime.datetime.now(ET).strftime("%A")
-    lad = random.choice(list(USERNAME_MAP.values()))
-    history_fact = await fetch_history_fact()
-    fact_line = f' Include a "this day in history" callout using this fact - give it a proper sentence or two, make it sound like you just remembered it, and relate it to one of the lads or something they\'d do: "{history_fact}"' if history_fact else ""
-    def _ask():
-        return claude.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=350,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": (
-                f"It's {day} morning. Write a short good morning message to the lads (3-4 sentences max). "
-                f"Make sure to reference {lad} specifically. "
-                "Stay fully in character. Reference the day if relevant (e.g. Monday back to the grind, Wednesday hump day, etc). "
-                f"No hashtags.{fact_line}"
-            )}],
-        )
-    response = await asyncio.to_thread(_ask)
-    await channel.send(response.content[0].text)
 
 
 @bot.command(name="testnews")
