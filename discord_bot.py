@@ -456,6 +456,80 @@ async def before_hockey_live_update():
     await asyncio.sleep(60)  # wait 60s after startup before first run
 
 
+# ── quant picks ───────────────────────────────────────────────────────────────
+
+# Picks older than this are never auto-posted. The pipeline is run by hand on a
+# laptop, so a skipped week would otherwise republish the previous snapshot under
+# a fresh Sunday heading and read as though it were new research. Failing silent
+# and logging is the right trade here: no post is obviously nothing, whereas a
+# stale post looks exactly like a good one.
+MAX_PICKS_AGE_DAYS = 14
+
+
+async def _send_picks_table(channel, count: int = 10) -> str | None:
+    """
+    Render the picks table into `channel`. Returns an error string, or None.
+
+    Shared by !picks and the Sunday auto-post so the two cannot drift apart; the
+    scheduled version is the one nobody watches, which is exactly the one that
+    should not be a second copy of this logic.
+    """
+    payload, error = await asyncio.to_thread(quant_picks.build_table_embed, count)
+    if error:
+        return error
+
+    # Preferred path: a rendered PNG in the same synthwave style as the price
+    # charts. The ANSI embed below is the fallback, not a lesser option — it is
+    # the version whose numbers can be copied and read by a screen reader, so a
+    # render failure degrades to something still usable rather than to nothing.
+    try:
+        img, img_err = await asyncio.to_thread(table_image.render_latest, count)
+        if img and not img_err:
+            embed = discord.Embed(title=payload["title"], colour=payload["color"])
+            embed.set_image(url="attachment://picks.png")
+            embed.set_footer(text=payload["footer"])
+            try:
+                await channel.send(embed=embed,
+                                   file=discord.File(img, filename="picks.png"))
+            finally:
+                os.remove(img)
+            return None
+    except Exception as e:
+        print(f"[picks] table image failed, falling back to text: {e}")
+
+    embed = discord.Embed(title=payload["title"], description=payload["body"],
+                          colour=payload["color"])
+    embed.set_footer(text=payload["footer"])
+    await channel.send(embed=embed)
+    return None
+
+
+@tasks.loop(time=datetime.time(hour=10, minute=0, tzinfo=ZoneInfo("America/Toronto")))
+async def sunday_picks():
+    """Auto-post the model's top 10 on Sunday at 10 AM ET."""
+    if datetime.datetime.now(ET).weekday() != 6:  # 6 = Sunday
+        return
+    channel_id = int(os.getenv("SCAN_CHANNEL_ID", 0))
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        print("SCAN_CHANNEL_ID not set or channel not found — skipping sunday picks")
+        return
+
+    picks_row, snap = await asyncio.to_thread(quant_picks.load_latest_picks, 1)
+    if not picks_row or snap is None:
+        print("[sunday_picks] nothing scored yet — skipping")
+        return
+    age = (datetime.date.today() - snap).days
+    if age > MAX_PICKS_AGE_DAYS:
+        print(f"[sunday_picks] newest snapshot is {snap} ({age}d old), over the "
+              f"{MAX_PICKS_AGE_DAYS}d limit — skipping rather than posting stale picks")
+        return
+
+    error = await _send_picks_table(channel, 10)
+    if error:
+        print(f"[sunday_picks] {error}")
+
+
 @tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
 async def weekly_scan():
     """Auto-post Friday picks at 9 AM ET."""
@@ -586,6 +660,7 @@ async def on_ready():
 
     weekly_scan.start()
     daily_news.start()
+    sunday_picks.start()
     # hockey tasks disabled for off-season — re-enable in April
     # hockey_schedule_update.start()
     # hockey_morning_recap.start()
@@ -683,58 +758,18 @@ async def scan(ctx: commands.Context):
 
 
 @bot.command(name="picks")
-async def picks(ctx: commands.Context, count: int = 5):
-    """Post the quant model's latest ranked picks, with a chart for each."""
+async def picks(ctx: commands.Context, count: int = 10):
+    """Post the quant model's current top N."""
     # Replies wherever it is invoked — ctx.channel, not a fixed channel ID — so the
     # same command serves the test server and the main one without a second variant.
     #
-    # The pipeline takes tens of minutes, so nothing is computed here — this reads
+    # The pipeline takes tens of minutes, so nothing is computed here: this reads
     # whatever the last `9_score.py --save` published. Everyone asking on the same
     # day therefore gets the same list from the same timestamped row.
     count = max(1, min(count, 25))
-
-    # Past five names, a table beats a thread: one scannable message instead of ten
-    # paragraphs and ten charts. The short reasons come straight off the stored SHAP
-    # values, so the table needs no model call and returns instantly.
-    payload, error = await asyncio.to_thread(quant_picks.build_table_embed, count)
+    error = await _send_picks_table(ctx.channel, count)
     if error:
         await ctx.send(error)
-        return
-
-    # Preferred path: a rendered PNG in the same synthwave style as the price
-    # charts. A code block gets eight ANSI colours and one font, which is why
-    # the text version always looked like a terminal sitting next to the
-    # charts rather than part of the same post.
-    #
-    # The ANSI embed below is the fallback, not a lesser option: it is the
-    # version whose numbers can be copied and read by a screen reader, so a
-    # render failure degrades to something still usable rather than to nothing.
-    try:
-        img, img_err = await asyncio.to_thread(table_image.render_latest, count)
-        if img and not img_err:
-            embed = discord.Embed(
-                title=payload["title"], colour=payload["color"])
-            embed.set_image(url="attachment://picks.png")
-            embed.set_footer(text=payload["footer"])
-            try:
-                await ctx.send(embed=embed,
-                               file=discord.File(img, filename="picks.png"))
-            finally:
-                os.remove(img)
-            return
-    except Exception as e:
-        print(f"[picks] table image failed, falling back to text: {e}")
-    # An embed rather than a bare message: it carries a coloured border, a real
-    # title and small-type footer, so the footnote stops competing with the data.
-    # The body is a ```ansi fence, which Discord renders with actual colour.
-    embed = discord.Embed(
-        title=payload["title"],
-        description=payload["body"],
-        colour=payload["color"],
-    )
-    embed.set_footer(text=payload["footer"])
-    await ctx.send(embed=embed)
-    return
 
 
 @bot.command(name="testscan")
