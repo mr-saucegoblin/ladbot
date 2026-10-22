@@ -546,21 +546,29 @@ async def _run_quant_pipeline(report_channel=None) -> bool:
         _pipeline_running = False
 
 
-@tasks.loop(time=datetime.time(hour=22, minute=0, tzinfo=ZoneInfo("America/Toronto")))
+@tasks.loop(time=datetime.time(hour=3, minute=0, tzinfo=ZoneInfo("America/Toronto")))
 async def saturday_pipeline():
     """
-    Refresh the quant data on Saturday night, ahead of Sunday's post.
+    Refresh the quant data overnight, ahead of Sunday morning's post.
 
-    22:00 ET Saturday leaves twelve hours before sunday_picks runs at 10:00, which
-    is slack enough for a slow FMP night without the two colliding. It also puts
-    the heavy work when nobody is using the bot, since each step is a separate
-    process competing with this one for the container's memory.
+    Fires at 03:00 ET on SUNDAY - "Saturday night" in the colloquial sense, the
+    small hours after Saturday. That is seven hours before sunday_picks runs at
+    10:00, and it puts the heavy work at the deadest point of the week, since
+    each step is a separate process competing with this one for the container.
+
+    Seven hours is the margin the whole arrangement rests on. The run is
+    wall-clock bound by FMP's rate limit rather than by CPU, so a slow night is
+    normal; if it ever starts running long, move this earlier rather than moving
+    the post later.
+
+    last_trading_day() resolves a Sunday to the preceding Friday, so the snapshot
+    is dated by the last session that actually has prices behind it.
 
     If it fails, Sunday posts nothing: sunday_picks refuses data older than
     MAX_PICKS_AGE_DAYS, so a failed refresh degrades to silence rather than to
     last week's picks presented as this week's.
     """
-    if datetime.datetime.now(ET).weekday() != 5:  # 5 = Saturday
+    if datetime.datetime.now(ET).weekday() != 6:  # 6 = Sunday (Saturday overnight)
         return
     channel = bot.get_channel(OPS_CHANNEL_ID)
     print("[saturday_pipeline] starting weekly refresh")
