@@ -35,6 +35,7 @@ from tweet_generator import generate_thread
 from chart_generator import generate_chart
 import hockey_scraper
 import job_scraper
+import pipeline_runner
 import quant_picks
 import table_image
 
@@ -504,6 +505,77 @@ async def _send_picks_table(channel, count: int = 10) -> str | None:
     return None
 
 
+# Where unattended-run reports go. Defaults to the test channel: a pipeline that
+# took 40 minutes and failed is operations, not content, and nobody in the main
+# channel wants a stack trace on a Saturday night.
+OPS_CHANNEL_ID = int(os.getenv("OPS_CHANNEL_ID", "891720029861732356"))
+
+# Guards against two runs overlapping — a scheduled one and a hand-triggered one,
+# or a run that is still going when the next week comes round. Both would write
+# the same rows from two processes.
+_pipeline_running = False
+
+
+async def _run_quant_pipeline(report_channel=None) -> bool:
+    """
+    Run the full pipeline in subprocesses, reporting to `report_channel`.
+
+    Returns True on success. Never raises: this is called from a scheduled loop,
+    and an exception escaping a tasks.loop cancels the loop silently, so the next
+    week would simply never run.
+    """
+    global _pipeline_running
+    if _pipeline_running:
+        print("[quant_pipeline] already running — skipping")
+        return False
+    _pipeline_running = True
+    try:
+        ok, lines = await asyncio.to_thread(pipeline_runner.run_pipeline)
+        if report_channel:
+            head = "Quant pipeline finished" if ok else "Quant pipeline FAILED"
+            body = "\n".join(lines)[:1800]
+            await report_channel.send(
+                f"**{head}**\n" + "```\n" + body + "\n```")
+        return ok
+    except Exception as e:
+        print(f"[quant_pipeline] crashed: {e}")
+        if report_channel:
+            await report_channel.send(f"Quant pipeline crashed: `{e}`")
+        return False
+    finally:
+        _pipeline_running = False
+
+
+@tasks.loop(time=datetime.time(hour=22, minute=0, tzinfo=ZoneInfo("America/Toronto")))
+async def saturday_pipeline():
+    """
+    Refresh the quant data on Saturday night, ahead of Sunday's post.
+
+    22:00 ET Saturday leaves twelve hours before sunday_picks runs at 10:00, which
+    is slack enough for a slow FMP night without the two colliding. It also puts
+    the heavy work when nobody is using the bot, since each step is a separate
+    process competing with this one for the container's memory.
+
+    If it fails, Sunday posts nothing: sunday_picks refuses data older than
+    MAX_PICKS_AGE_DAYS, so a failed refresh degrades to silence rather than to
+    last week's picks presented as this week's.
+    """
+    if datetime.datetime.now(ET).weekday() != 5:  # 5 = Saturday
+        return
+    channel = bot.get_channel(OPS_CHANNEL_ID)
+    print("[saturday_pipeline] starting weekly refresh")
+    await _run_quant_pipeline(channel)
+
+
+@bot.command(name="runpipeline")
+@commands.is_owner()
+async def runpipeline(ctx: commands.Context):
+    """Trigger the quant pipeline by hand. Owner only — it runs for ~an hour."""
+    await ctx.send("Starting the quant pipeline, this takes a while...")
+    ok = await _run_quant_pipeline(ctx.channel)
+    await ctx.send("Pipeline finished." if ok else "Pipeline failed — see above.")
+
+
 @tasks.loop(time=datetime.time(hour=10, minute=0, tzinfo=ZoneInfo("America/Toronto")))
 async def sunday_picks():
     """Auto-post the model's top 10 on Sunday at 10 AM ET."""
@@ -661,6 +733,7 @@ async def on_ready():
     weekly_scan.start()
     daily_news.start()
     sunday_picks.start()
+    saturday_pipeline.start()
     # hockey tasks disabled for off-season — re-enable in April
     # hockey_schedule_update.start()
     # hockey_morning_recap.start()
