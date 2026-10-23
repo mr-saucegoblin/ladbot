@@ -29,3 +29,6 @@ quant/quant_model.txt
 
 # Claude Code session state
 .claude/
+
+# in-flight marker written by the pipeline, recreated on each run
+pipeline_inflight.json

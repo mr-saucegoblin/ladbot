@@ -520,6 +520,66 @@ OPS_CHANNEL_ID = int(os.getenv("OPS_CHANNEL_ID", "891720029861732356"))
 _pipeline_running = False
 
 
+# A pipeline run that is killed mid-step cannot update its own status message,
+# so the board freezes on ">" forever and reads as though the job is still going.
+# That is exactly what a Railway redeploy does: it replaces the container, the
+# bot dies, and any subprocess it owns dies with it.
+#
+# The fix is a marker written before the run and deleted after. It lives beside
+# DB_PATH, which is on the Railway volume, so it survives the restart that killed
+# the run. On the next boot, a marker that is still there means the previous run
+# never finished, and the stale board gets corrected.
+_INFLIGHT = os.path.join(
+    os.path.dirname(os.environ.get("DB_PATH", "")) or os.path.dirname(__file__),
+    "pipeline_inflight.json",
+)
+
+
+def _mark_inflight(channel_id, message_id):
+    try:
+        with open(_INFLIGHT, "w", encoding="utf-8") as fh:
+            json.dump({"channel": channel_id, "message": message_id,
+                       "started": datetime.datetime.now(ET).isoformat()}, fh)
+    except Exception as e:
+        print(f"[weekly_pipeline] could not write in-flight marker: {e}")
+
+
+def _clear_inflight():
+    try:
+        if os.path.exists(_INFLIGHT):
+            os.remove(_INFLIGHT)
+    except Exception as e:
+        print(f"[weekly_pipeline] could not clear in-flight marker: {e}")
+
+
+async def _recover_interrupted_pipeline():
+    """
+    On boot, correct the status message of a run that never finished.
+
+    Called before the loops start. Clears the marker whatever happens, including
+    when the message or channel has since been deleted, so one unrecoverable run
+    cannot leave the bot reporting the same interruption on every restart.
+    """
+    if not os.path.exists(_INFLIGHT):
+        return
+    try:
+        with open(_INFLIGHT, encoding="utf-8") as fh:
+            m = json.load(fh)
+        channel = bot.get_channel(int(m["channel"]))
+        if channel:
+            msg = await channel.fetch_message(int(m["message"]))
+            body = msg.content.replace("> ", "x ").replace(
+                "  running", " stopped")
+            note = ("\n**Interrupted — the bot restarted mid-run. Nothing "
+                    "was corrupted; re-run with `!runpipeline`.**")
+            await msg.edit(content=body + note)
+            print("[weekly_pipeline] corrected a stale in-flight board")
+    except Exception as e:
+        print(f"[weekly_pipeline] could not recover stale board: {e}")
+    finally:
+        _clear_inflight()
+
+
 async def _run_quant_pipeline(report_channel=None) -> bool:
     """
     Run the pipeline step by step, editing one status message as it goes.
@@ -559,6 +619,7 @@ async def _run_quant_pipeline(report_channel=None) -> bool:
     try:
         if report_channel:
             msg = await report_channel.send(board(head))
+            _mark_inflight(report_channel.id, msg.id)
 
         total = 0.0
         for i, (args, timeout, label) in enumerate(steps):
@@ -597,6 +658,7 @@ async def _run_quant_pipeline(report_channel=None) -> bool:
         return False
     finally:
         _pipeline_running = False
+        _clear_inflight()
 
 
 @tasks.loop(time=datetime.time(hour=17, minute=0, tzinfo=ZoneInfo("America/Toronto")))
@@ -793,6 +855,8 @@ async def on_ready():
     if os.getenv("DEV_MODE"):
         print("DEV_MODE — scheduled tasks NOT started (commands still active)")
         return
+
+    await _recover_interrupted_pipeline()
 
     weekly_scan.start()
     daily_news.start()
