@@ -522,27 +522,76 @@ _pipeline_running = False
 
 async def _run_quant_pipeline(report_channel=None) -> bool:
     """
-    Run the full pipeline in subprocesses, reporting to `report_channel`.
+    Run the pipeline step by step, editing one status message as it goes.
 
-    Returns True on success. Never raises: this is called from a scheduled loop,
-    and an exception escaping a tasks.loop cancels the loop silently, so the next
-    week would simply never run.
+    The steps are driven from here rather than by pipeline_runner.run_pipeline()
+    so each one finishes on the event loop, where a Discord edit can happen. The
+    alternative — a callback fired from inside the worker thread — would mean
+    scheduling coroutines across threads for no benefit. run_step() is still the
+    only thing that knows how to execute a step; only the loop around it moved.
+
+    One self-editing message beats a message per step. A 25-minute run would
+    otherwise bury the channel in twelve lines, and the interesting state is
+    always "where is it now", which an edit shows and a transcript does not.
+
+    Never raises. An exception escaping a tasks.loop cancels the loop silently,
+    so next week would simply never run.
     """
     global _pipeline_running
     if _pipeline_running:
-        print("[quant_pipeline] already running — skipping")
+        print("[weekly_pipeline] already running - skipping")
         return False
     _pipeline_running = True
+
+    as_of = pipeline_runner.last_trading_day()
+    steps = pipeline_runner.STEPS
+    mark = ["." for _ in steps]      # . pending   > running   + done   x failed
+    timing = ["" for _ in steps]
+    fence = "```"
+
+    def board(title: str) -> str:
+        rows = [f"{m} {a[0]:<26}{t:>9}  {lb}"
+                for (a, _to, lb), m, t in zip(steps, mark, timing)]
+        return f"**{title}**\n{fence}\n" + "\n".join(rows) + f"\n{fence}"
+
+    head = f"Quant pipeline · as-of {as_of}"
+    msg = None
     try:
-        ok, lines = await asyncio.to_thread(pipeline_runner.run_pipeline)
         if report_channel:
-            head = "Quant pipeline finished" if ok else "Quant pipeline FAILED"
-            body = "\n".join(lines)[:1800]
-            await report_channel.send(
-                f"**{head}**\n" + "```\n" + body + "\n```")
-        return ok
+            msg = await report_channel.send(board(head))
+
+        total = 0.0
+        for i, (args, timeout, label) in enumerate(steps):
+            args = [a.format(as_of=as_of.isoformat()) for a in args]
+
+            mark[i], timing[i] = ">", "running"
+            if msg:
+                await msg.edit(content=board(head))
+
+            ok, secs, tail = await asyncio.to_thread(
+                pipeline_runner.run_step, args, timeout, label, print)
+            total += secs
+
+            if not ok:
+                mark[i], timing[i] = "x", f"{secs / 60:.1f} min"
+                if msg:
+                    await msg.edit(content=board(f"Quant pipeline FAILED · as-of {as_of}"))
+                if report_channel:
+                    await report_channel.send(
+                        f"**{args[0]} failed**\n{fence}\n{tail[-1500:]}\n{fence}")
+                return False
+
+            mark[i], timing[i] = "+", f"{secs / 60:.1f} min"
+            if msg:
+                await msg.edit(content=board(head))
+
+        if msg:
+            await msg.edit(content=board(
+                f"Quant pipeline done in {total / 60:.1f} min · as-of {as_of}"))
+        return True
+
     except Exception as e:
-        print(f"[quant_pipeline] crashed: {e}")
+        print(f"[weekly_pipeline] crashed: {e}")
         if report_channel:
             await report_channel.send(f"Quant pipeline crashed: `{e}`")
         return False
