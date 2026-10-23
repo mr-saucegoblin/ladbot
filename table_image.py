@@ -183,8 +183,7 @@ def render(picks, snap, scope, out_path=None) -> str:
             color=_TEXT, fontsize=7.5, fontfamily=MONO, va="center", ha="left",
             alpha=0.45)
     ax.text(X_LEFT, units - 0.95,
-            "cyan helped the score  ·  pink hurt it  ·  "
-            "statistical ranking, not advice",
+            "cyan helped the score  ·  pink hurt it",
             color=_TEXT, fontsize=7.5, fontfamily=MONO, va="center", ha="left",
             alpha=0.45)
 

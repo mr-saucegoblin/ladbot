@@ -296,7 +296,7 @@ def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
         "title": f"LadBot \u2014 Top {len(picks)} Holdings",
         "body": "```ansi\n" + "\n".join(rows) + "\n```",
         "footer": (f"{snap}  \u00b7  {scope}  \u00b7  score = how strongly it "
-                   f"shows that trait (0-100 vs sector)  \u00b7  not advice"),
+                   f"shows that trait (0-100 vs sector)"),
         "color": 0xFF2D78,
     }, None
 
@@ -333,9 +333,8 @@ def build_table(n: int = 10) -> tuple[str | None, str | None]:
     header = (
         f"**LadBot · Top {len(picks)} Holdings · {snap}**\n"
         f"```\n" + "\n".join(rows) + "\n```\n"
-        f"*{scope} · score = how strongly it shows that trait (0-100, "
-        f"vs sector) · not advice · `!picks {min(len(picks), 5)}` "
-        f"for write-ups*"
+        f"*{scope} · score = how strongly it shows that trait "
+        f"(0-100, vs sector)*"
     )
     return header, None
 

@@ -176,8 +176,7 @@ def main(top, want_charts, open_browser):
         f'that way, 0–100 against its sector peers. '
         f'<span style="color:{CYAN}">Cyan</span> pushed the score up, '
         f'<span style="color:{PINK}">pink</span> pushed it down.<br>'
-        f'generated {datetime.now():%Y-%m-%d %H:%M} — statistical ranking, '
-        f'not advice</p></div>'
+        f'generated {datetime.now():%Y-%m-%d %H:%M}</p></div>'
     )
 
     with open(OUT, "w", encoding="utf-8") as fh:
