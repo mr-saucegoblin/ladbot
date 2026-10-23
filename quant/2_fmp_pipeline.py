@@ -49,9 +49,33 @@ _timing = {"api_calls": 0, "api_secs": 0.0}
 # ── Ticker list ────────────────────────────────────────────────────────────────
 
 def load_covered_tickers(path: str = COVERED_FILE) -> list[str]:
-    """Read fmp_covered.txt, return list of tickers."""
+    """
+    Read fmp_covered.txt, minus anything on the reviewed depositary-receipt list.
+
+    The filter is here, at READ time, and not only in 1_fetch_universe.py where
+    the file is written. On 2026-10-23 that distinction cost a pipeline run: the
+    CDRs had been purged from the database, 1_fetch_universe.py had been taught to
+    exclude them, but it had not been re-run - so fmp_covered.txt still listed all
+    122, this script upserted every one of them straight back into `tickers`, and
+    6_feature_compute.py aborted on finding them.
+
+    A list of tickers to process is a thing that goes stale. Filtering where it is
+    consumed means a stale file cannot reintroduce what a purge removed, and no
+    one has to remember to regenerate it first.
+    """
     with open(path) as f:
-        return [line.strip() for line in f if line.strip()]
+        tickers = [line.strip() for line in f if line.strip()]
+
+    from cdr_list import load_cdr_exclusions
+    excluded = load_cdr_exclusions()
+    if excluded:
+        keep = [t for t in tickers if t not in excluded]
+        if len(keep) != len(tickers):
+            print(f"  cdr_exclusions.txt: skipping {len(tickers) - len(keep)} "
+                  f"depositary receipts still listed in {pathlib.Path(path).name}")
+        return keep
+    print("  WARNING: cdr_exclusions.txt missing - depositary receipts NOT filtered")
+    return tickers
 
 
 # ── FMP HTTP helpers ───────────────────────────────────────────────────────────
