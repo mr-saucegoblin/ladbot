@@ -1,0 +1,17 @@
+# Railway builds this repo with Nixpacks, and its Python image does not include
+# the GNU OpenMP runtime. LightGBM's wheel links against libgomp.so.1, so any
+# process that imports it dies at import time with:
+#
+#   OSError: libgomp.so.1: cannot open shared object file: No such file or directory
+#
+# This never mattered while Railway only ran the Discord bot, which imports
+# psycopg2 and matplotlib but never lightgbm. It surfaced the first time
+# pipeline_runner.py ran 9_score.py in a subprocess on Railway: steps 1-5 passed
+# and scoring failed on the import, before a single line of its own code ran.
+#
+# The "..." entry is Nixpacks' spread: it keeps whatever the Python provider
+# detected and appends to it. Without it this list REPLACES the defaults, which
+# removes packages the build itself needs.
+
+[phases.setup]
+aptPkgs = ["...", "libgomp1"]
