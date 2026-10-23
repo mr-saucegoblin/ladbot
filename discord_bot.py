@@ -550,32 +550,35 @@ async def _run_quant_pipeline(report_channel=None) -> bool:
         _pipeline_running = False
 
 
-@tasks.loop(time=datetime.time(hour=3, minute=0, tzinfo=ZoneInfo("America/Toronto")))
-async def saturday_pipeline():
+@tasks.loop(time=datetime.time(hour=17, minute=0, tzinfo=ZoneInfo("America/Toronto")))
+async def weekly_pipeline():
     """
-    Refresh the quant data overnight, ahead of Sunday morning's post.
+    Refresh the quant data after Friday's close, ahead of Sunday's post.
 
-    Fires at 03:00 ET on SUNDAY - "Saturday night" in the colloquial sense, the
-    small hours after Saturday. That is seven hours before sunday_picks runs at
-    10:00, and it puts the heavy work at the deadest point of the week, since
-    each step is a separate process competing with this one for the container.
+    17:00 ET Friday, an hour after the market closes. Running it on the trading
+    day it covers is the point: last_trading_day() returns Friday, so the
+    snapshot is dated Friday AND priced from Friday's close. A weekend run would
+    produce the same date reaching back to the same close, with two extra days
+    for something to go wrong in between.
 
-    Seven hours is the margin the whole arrangement rests on. The run is
-    wall-clock bound by FMP's rate limit rather than by CPU, so a slow night is
-    normal; if it ever starts running long, move this earlier rather than moving
-    the post later.
+    Named for its cadence rather than its day, because this has already moved
+    once and a name like saturday_pipeline starts lying the moment it does.
 
-    last_trading_day() resolves a Sunday to the preceding Friday, so the snapshot
-    is dated by the last session that actually has prices behind it.
+    Forty-one hours before sunday_picks runs, which is more slack than the job
+    needs - it is wall-clock bound by FMP's rate limit, not by CPU.
+
+    One caveat: FMP has to have published Friday's close by 17:00. If it has not,
+    the snapshot is dated Friday but priced from Thursday, which is wrong in a
+    quiet way. Check the first run; move this later if the close is missing.
 
     If it fails, Sunday posts nothing: sunday_picks refuses data older than
     MAX_PICKS_AGE_DAYS, so a failed refresh degrades to silence rather than to
     last week's picks presented as this week's.
     """
-    if datetime.datetime.now(ET).weekday() != 6:  # 6 = Sunday (Saturday overnight)
+    if datetime.datetime.now(ET).weekday() != 4:  # 4 = Friday
         return
     channel = bot.get_channel(OPS_CHANNEL_ID)
-    print("[saturday_pipeline] starting weekly refresh")
+    print("[weekly_pipeline] starting weekly refresh")
     await _run_quant_pipeline(channel)
 
 
@@ -745,7 +748,7 @@ async def on_ready():
     weekly_scan.start()
     daily_news.start()
     sunday_picks.start()
-    saturday_pipeline.start()
+    weekly_pipeline.start()
     # hockey tasks disabled for off-season — re-enable in April
     # hockey_schedule_update.start()
     # hockey_morning_recap.start()
