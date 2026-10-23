@@ -464,6 +464,10 @@ async def before_hockey_live_update():
 # a fresh Sunday heading and read as though it were new research. Failing silent
 # and logging is the right trade here: no post is obviously nothing, whereas a
 # stale post looks exactly like a good one.
+# How many names every picks output shows - the command, the Sunday post and
+# the rendered image all read this.
+PICKS_COUNT = 10
+
 MAX_PICKS_AGE_DAYS = 14
 
 
@@ -605,7 +609,7 @@ async def sunday_picks():
               f"{MAX_PICKS_AGE_DAYS}d limit — skipping rather than posting stale picks")
         return
 
-    error = await _send_picks_table(channel, 10)
+    error = await _send_picks_table(channel, PICKS_COUNT)
     if error:
         print(f"[sunday_picks] {error}")
 
@@ -839,16 +843,19 @@ async def scan(ctx: commands.Context):
 
 
 @bot.command(name="picks")
-async def picks(ctx: commands.Context, count: int = 10):
-    """Post the quant model's current top N."""
-    # Replies wherever it is invoked — ctx.channel, not a fixed channel ID — so the
+async def picks(ctx: commands.Context):
+    """Post the quant model's current top 10."""
+    # Takes no argument. The count was a parameter nobody used: the Sunday post is
+    # ten, the image is laid out for ten, and "!picks 23" produced a tall image
+    # answering a question no one asked. PICKS_COUNT is the one place to change it.
+    #
+    # Replies wherever it is invoked - ctx.channel, not a fixed channel ID - so the
     # same command serves the test server and the main one without a second variant.
     #
     # The pipeline takes tens of minutes, so nothing is computed here: this reads
     # whatever the last `9_score.py --save` published. Everyone asking on the same
     # day therefore gets the same list from the same timestamped row.
-    count = max(1, min(count, 25))
-    error = await _send_picks_table(ctx.channel, count)
+    error = await _send_picks_table(ctx.channel, PICKS_COUNT)
     if error:
         await ctx.send(error)
 
