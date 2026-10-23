@@ -89,7 +89,9 @@ set**, not three models. See *Deviations* below.
 ## Stock Universe
 
 - **All TSX main-board stocks** — not limited to Composite/Small Cap index constituents
-- **594 tickers** after purging preferred shares, ADRs/CDRs, funds, and foreign-currency listings
+- **~408 names actually scored** at a live snapshot, from ~625 tickers carrying history
+- Purged: preferred shares, funds, foreign-currency listings, and **122 depositary receipts**
+  (see *Data Integrity*) — the reviewed list is `quant/cdr_exclusions.txt`
 - **Excludes** TSXV (too speculative, too illiquid), ETFs, mutual funds, sub-$0.50 stocks
 - **Delisted tickers are deliberately retained** — dropping them would introduce survivorship
   bias into backtests. ~138 of 594 have price data ending before the current date.
@@ -181,7 +183,10 @@ Not yet wired: Discord alerts, Twitter/X posting, hosting of the model itself.
 | `5_factor_compute.py` | Piotroski + Altman Z' → `financial_scores` | ~5 min |
 | `6_feature_compute.py` | Monthly feature snapshots, 3 passes | ~35–40 min |
 | `7_eda.py` | Clean, exclude, target, split → parquet + manifest | ~1 min |
-| `8_model.py` | Train + evaluate LightGBM | minutes |
+| `8_model.py` | Train + evaluate LightGBM (walk-forward) | minutes |
+| `9_score.py` | Score a live snapshot → `predictions` table | ~2 min |
+| `10_factor_baseline.py` | IC and decile spreads per feature, no model | ~2 min |
+| `11_selection_stability.py` | Was the feature cut honest? train-only vs full-sample | ~3 min |
 
 **There is no `4_`.** It was a Google Trends pipeline, fully removed (look-ahead bias from
 Google's window-relative normalisation; flat-zero data for micro-caps).
@@ -192,7 +197,13 @@ Utilities: `backfill_currency.py`, `backfill_ticker_flags.py`, `backfill_balance
 
 Useful flags: `5_factor_compute.py --reset` (wipe scores, rebuild — removes orphans a plain
 upsert can't reach); `6_feature_compute.py --returns-only / --percentiles-only /
---clean-stale-returns`; most scripts take `--test`.
+--clean-stale-returns / --as-of / --new-only`; most scripts take `--test`.
+
+**`--new-only` is what makes a weekly run viable.** By default `6_feature_compute.py`
+recomputes every month-end since 2019 — ~59,000 (ticker, date) pairs to produce ~629 new
+rows, or 1.1% useful work. A finished snapshot cannot change: every feature in it is a
+trailing window ending on its own date. `--new-only` skips pairs already stored and always
+recomputes the `--as-of` row, since that is the live one whose price features move daily.
 
 ---
 
@@ -317,6 +328,7 @@ matters more than any single number.
 | 3 | binary, ranked | 1m | 0.5062 | −1.47% | nothing (stopped at 3 trees) |
 | 4 | lambdarank, raw-return grades | 3m | 0.4974 | +6.79% | **bought volatility** |
 | 5 | lambdarank, vol-adjusted grades | 3m | 0.5122 | +2.94% | mild, unproven edge |
+| 6 | run 5, clean universe, 16 features | 3m | 0.5201 | **+3.46%** | momentum + small + cheap |
 
 **The through-line: the model finds whichever risk tilt the metric rewards.** A binary target
 produced a low-volatility tilt (high hit rate, flat mean return). A raw-return ranking target
@@ -333,6 +345,39 @@ Seven years cannot settle it.
 Only decile 10 differentiates (8.51% vs ~5.6% flat across deciles 1–9). For a long-only
 strategy that is the bucket that matters, but it does mean the ranking is not monotone.
 
+### Run 6 — the current model (October 2026)
+
+Run 5's successor, after three changes: 122 depositary receipts removed from the universe,
+the feature set cut from 85 to 16, and near-duplicate features dropped.
+
+| metric | value |
+|---|---|
+| top-minus-bottom decile spread | **+3.46%** per 3 months |
+| t-stat, non-overlapping windows | **2.28** |
+| market-neutral spread (beta +0.01) | +3.48%, t = 2.25 |
+| long-only vs universe | +2.30%, t = 2.31 (market-neutral +2.59%, t = 2.65) |
+| months top half beat bottom | 30 of 40 |
+| pooled out-of-sample AUC | 0.5201 |
+
+**It is not a disguised market bet.** Regressing the monthly spread on the universe return
+gives a beta of +0.01 — the edge survives market-neutralisation essentially unchanged. Run 4
+failed exactly this test.
+
+**But it is fragile.** Drop the three best months and it falls to +2.75%, t = 1.72 — under
+the bar. Forty overlapping months are ~13 independent periods.
+
+**And the selection is contaminated.** The 63 weak features were cut using t-stats measured
+over all 90 months, including the walk-forward's own test windows, so the model was handed
+the columns that happened to work in the period it was then scored on. Choosing features is
+a fitted decision even though no model was fitted when the t-stats were computed.
+`11_selection_stability.py` exists to measure how much of the gain survives honest selection;
+it has not been run. **Quote the edge as "roughly 2–3.5% per quarter", never a t-stat.**
+
+**What the model actually is:** momentum, small size, and cheapness — where low operating
+margin acts as a value proxy rather than a quality signal. Seven of the current top ten are
+carried by "small cap", five by "low operating margin". That is a real, interpretable tilt,
+and it is the opposite of quality investing.
+
 **The backtest is close to spent.** Five rounds of looking at a test result and changing
 something is itself a form of overfitting that no number in the output can reveal. Further
 gains should come from *new information* — real historical news, insider trades, analyst
@@ -343,6 +388,37 @@ genuinely uncontaminated evidence.
 ---
 
 ## Data Integrity — found and fixed
+
+### Depositary receipts — 22% of the universe was not Canadian
+
+The worst one, found October 2026. The TSX screener lists ~122 CIBC-style Canadian
+Depositary Receipts: CAD-hedged wrappers around Apple, Nvidia, Nestlé, LVMH, Berkshire.
+FMP serves the **parent's** profile and fundamentals under the `.TO` symbol, so Apple
+appeared as a Toronto-listed Technology company with 166,000 employees in Cupertino.
+
+Three detection methods fail:
+
+- **`isAdr` is `False` for every one of them.** A backfill across 751 tickers found zero
+  ADRs in a universe that was 22% CDRs. The `adr-and-funds` purge preset therefore finds
+  only funds.
+- **`country = 'US'` over-captures.** Brookfield Wealth Solutions, Coeur Mining and
+  Ivanhoe Electric are US-domiciled and genuinely TSX-listed.
+- **The ISIN is `CA…`** for all of them — the receipt really is a Canadian security.
+
+What works: dollar-volume ÷ market cap. A CDR reports its parent's market cap but trades
+thin in Toronto. CDRs measured 8–352 ppm; real TSX names 980–6,457 ppm. **That screen is a
+shortlist generator only** — it also flags small foreign-domiciled TSX listings, so the
+result was reviewed by hand and lives in `quant/cdr_exclusions.txt` (122 excluded, 19 kept).
+
+**The damage was never confined to those rows.** `fill_sector_percentiles()` ranks within
+sector, so Nvidia in Technology shifted the percentile of every Canadian tech name, and five
+modelled features are sector-relative. Excluding them at `7_eda.py` does *not* undo it —
+`6_feature_compute.py` has to re-run. Removing them took the decile spread from +4.42% to
++3.46%: the megacaps were easy wins, and a lower number on a real universe is worth more.
+
+`6_feature_compute.py` now hard-aborts via `assert_no_depositary_receipts()` when any
+reviewed CDR is still stored.
+
 
 Keep this list. Nearly every item hid behind a successful-looking run.
 
@@ -427,28 +503,82 @@ universe floor. Queued for the next rebuild.
 
 ## Recurring Bug Classes — check these first
 
-1. **`RealDictCursor` rows where tuples are expected.** Hit 3+ times. **Never pass
+1. **A flag that doesn't flag.** `tickers.is_adr` is `False` for every depositary receipt,
+   and `income_statements.filed_at` is `fiscal_date + 45` for every row rather than an
+   observed date. Both *look* like data and are actually constants. Before building logic
+   on a provider's boolean or date, check its distribution: a column with one value is a
+   column telling you nothing. This cost six weeks of redundant API calls and put Apple in
+   a Canadian stock-picking model.
+2. **`RealDictCursor` rows where tuples are expected.** Hit 3+ times. **Never pass
    `quant_db.get_conn()` to `pandas.read_sql`** — use a plain `psycopg2.connect()`. This
    corrupted every `export_csv.py` output for weeks, undetected because only row *counts*
    were checked, never contents.
-2. **Missing `init_schema()` in a DB-writing script.** Hit three times. `CREATE TABLE IF NOT
+3. **Missing `init_schema()` in a DB-writing script.** Hit three times. `CREATE TABLE IF NOT
    EXISTS` never alters a live table, so a new column computes fine in memory then fails at
    INSERT. New columns go in the `new_cols` `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` list.
-3. **Silent truncation from a missing date range.** FMP caps commodity/forex history at ~5yrs
+4. **Silent truncation from a missing date range.** FMP caps commodity/forex history at ~5yrs
    without explicit `from`/`to`, and `treasury-rates` at ~90 days per call. No error — just
    less data.
-4. **No dedup before a batch upsert.** `ON CONFLICT DO UPDATE` fails if one batch contains the
+5. **No dedup before a batch upsert.** `ON CONFLICT DO UPDATE` fails if one batch contains the
    same key twice.
-5. **A filter not checking a boolean the API already provides** (`isActivelyTrading`, `isAdr`).
-   Use `isAdr`, never `country`, to find depositary receipts — `country` is *domicile*, and
-   ~74 legitimate TSX names read 'US' (all of Brookfield, Restaurant Brands, Newmont).
-   `isFund` is unreliable alone — it flagged InterRent REIT while missing identical peers.
-6. **An upsert can't reach orphans.** Rows from an earlier run with different logic survive
+6. **A filter not checking a boolean the API already provides** — `isActivelyTrading` and
+   `isEtf` are worth honouring. **`isAdr` is not one of them:** an earlier version of this
+   list said to use it for depositary receipts, and that advice was wrong — FMP returns
+   `False` for all 122 of them. `country` fails too (it is *domicile*; ~74 legitimate TSX
+   names read 'US'). Use the reviewed `quant/cdr_exclusions.txt`. `isFund` is unreliable
+   alone — it flagged InterRent REIT while missing identical peers.
+7. **An upsert can't reach orphans.** Rows from an earlier run with different logic survive
    and still get read. `financial_scores` accumulated 5,666 of them, some dated 2001.
-7. **Unpinned major versions.** pandas 3.0's `.dt.date` change arrived silently. `pandas` is
+8. **Unpinned major versions.** pandas 3.0's `.dt.date` change arrived silently. `pandas` is
    now pinned.
-8. **Verify against actual values, not row counts or "no error."** Nearly every bug above hid
+9. **Verify against actual values, not row counts or "no error."** Nearly every bug above hid
    behind a successful-looking run.
+
+---
+
+## Serving — Discord and Railway
+
+The research system and the thing people see are two halves joined by one table.
+
+**`predictions`.** `9_score.py --save` writes the ranked list there with a `drivers` JSONB
+column holding each pick's SHAP breakdown. The bot reads that table and computes nothing.
+Whatever writes it — a laptop, Railway, a GitHub Action — the serving side cannot tell.
+That decoupling is why the Discord work never had to wait on the pipeline being hosted.
+
+**Schedule** (all times ET, in `discord_bot.py`):
+
+| when | task | what |
+|---|---|---|
+| Friday 17:00 | `weekly_pipeline` | six pipeline steps, an hour after the close |
+| Sunday 10:00 | `sunday_picks` | posts the top 10 to `SCAN_CHANNEL_ID` |
+
+Friday 17:00 means the snapshot is *dated* Friday **and** *priced* from Friday's close. A
+weekend run produces the same date reaching back to the same close with two extra days for
+something to break. The caveat is that FMP must have published the close by 17:00.
+
+**`pipeline_runner.py`** runs each step as a subprocess, not an import. Partly because
+`2_fmp_pipeline.py` is not a legal identifier, mainly for isolation: these jobs allocate
+heavily and call `sys.exit` on bad input, so a separate process returns its memory for
+certain and a `SystemExit` in step three cannot take the bot down. It **stops at the first
+failure** — running `9_score.py` after `6_feature_compute.py` failed would publish a ranking
+built on last week's features while dating it today.
+
+Progress appears as one self-editing Discord message in `OPS_CHANNEL_ID`, marking each step
+pending / running / done with its duration.
+
+**Failure degrades to silence.** `sunday_picks` refuses data older than `MAX_PICKS_AGE_DAYS`
+(14), so a failed refresh means no post rather than last week's picks presented as this
+week's. No post is obviously nothing; a stale post looks exactly like a good one.
+
+**Output.** `table_image.py` renders the picks as a PNG in `chart_generator.py`'s synthwave
+palette — portrait, because Discord scales to message width and a landscape strip becomes
+unreadable on a phone. Driver labels name a *direction* (`small cap 97`, not `size 3`) so a
+row reads without decoding. The ANSI text table in `quant_picks.py` is the fallback, and is
+not a lesser option: it is the version whose numbers can be selected and read by a screen
+reader.
+
+`!picks` takes no argument. `PICKS_COUNT` is the single knob, read by both the command and
+the Sunday post.
 
 ---
 
@@ -490,4 +620,4 @@ into an assumption about what the model is actually ranking.
 
 ---
 
-*Last updated: October 2026*
+*Last updated: 23 October 2026*
