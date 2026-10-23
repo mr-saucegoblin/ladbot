@@ -50,6 +50,10 @@ FIG_W_INCHES = 7.0
 LINE_H_INCHES = 0.30
 LINES_PER_PICK = 2.25
 
+# Characters that fit on the meta line between the ticker and the score, at
+# 8pt sans in a 1050px-wide render. Measured, not guessed.
+META_BUDGET = 72
+
 X_LEFT, X_RIGHT = 3.0, 97.0
 X_TICK = 9.0
 CHIP_FS = 12.0
@@ -161,12 +165,18 @@ def render(picks, snap, scope, out_path=None) -> str:
         cap = ("—" if not mc else
                f"${float(mc)/1e9:.1f}B" if float(mc) >= 1e9 else
                f"${float(mc)/1e6:.0f}M")
-        # The meta line runs from the ticker to the score. At 8pt sans in a 1050px
-        # render that is about 78 characters, of which the sector and market cap
-        # take roughly 14 - so the company name can have the rest. It was clipped
-        # at 22, which truncated six of ten names that fitted comfortably.
-        meta = (f"{_clip(p.get('company') or '', 46)}  ·  "
-                f"{qp.SECTOR_CODE.get(raw, raw[:4])}  ·  {cap}")
+        # Sector spelled out, not coded. "Matl" and "CCyc" exist because the
+        # Discord text table has 48 columns to work with; here there is room, and
+        # a reader should not have to decode an abbreviation to learn a stock is
+        # in Basic Materials.
+        #
+        # The meta line runs from the ticker to the score - about 72 characters at
+        # 8pt sans in a 1050px render. Sector and cap are fixed by the data, so the
+        # company name takes whatever is left rather than a fixed clip. Otherwise
+        # "Communication Services" plus a long name would run under the score.
+        sector = raw or "—"
+        budget = META_BUDGET - len(sector) - len(cap) - 6   # 6 = two separators
+        meta = f"{_clip(p.get('company') or '', max(budget, 12))}  ·  {sector}  ·  {cap}"
         ax.text(X_TICK + 11.0, y + 0.06, meta, color=_TEXT, fontsize=8,
                 fontfamily=SANS, va="center", ha="left", alpha=0.6)
 
