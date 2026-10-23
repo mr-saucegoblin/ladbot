@@ -56,9 +56,14 @@ META_BUDGET = 72
 
 X_LEFT, X_RIGHT = 3.0, 97.0
 X_TICK = 9.0
-CHIP_FS = 12.0
-CHIP_GAP = 2.0
-CHIP_W = (X_RIGHT - X_LEFT - 2 * CHIP_GAP) / 3     # three chips fill the width
+# Four chips, not three. Only the top three were ever stored before, so a pick
+# whose fourth-largest driver was improving margins showed no sign of it - and on
+# the October 2026 top ten that was half the list. 9_score.py now stores every
+# contribution; this shows one more of them.
+N_CHIPS = 4
+CHIP_FS = 10.0
+CHIP_GAP = 1.6
+CHIP_W = (X_RIGHT - X_LEFT - (N_CHIPS - 1) * CHIP_GAP) / N_CHIPS
 CHAR_W = CHIP_W / 17.0                              # 14 chars + padding per chip
 
 
@@ -106,9 +111,17 @@ def _chip(ax, slot, y, label, score, helped):
         boxstyle="round,pad=0.12,rounding_size=0.3",
         facecolor=colour, alpha=0.16, edgecolor="none", zorder=2,
     ))
-    ax.text(x + 1.4, y, label, color=colour, fontsize=CHIP_FS, fontfamily=MONO,
+    # `sector` is categorical, so it has no percentile and `score` is empty. Left
+    # aligned with a blank right half it reads as a rendering fault rather than as
+    # a feature without a number, so it gets centred instead.
+    if not score:
+        ax.text(x + CHIP_W / 2, y, label, color=colour, fontsize=CHIP_FS,
+                fontfamily=MONO, va="center", ha="center", alpha=0.85, zorder=3)
+        return
+
+    ax.text(x + 1.1, y, label, color=colour, fontsize=CHIP_FS, fontfamily=MONO,
             va="center", ha="left", alpha=0.85, zorder=3)
-    ax.text(x + CHIP_W - 1.4, y, score, color=colour, fontsize=CHIP_FS,
+    ax.text(x + CHIP_W - 1.1, y, score, color=colour, fontsize=CHIP_FS,
             fontfamily=MONO, fontweight="bold", va="center", ha="right", zorder=3)
 
 
@@ -184,7 +197,7 @@ def render(picks, snap, scope, out_path=None) -> str:
                 fontsize=13, fontfamily=MONO, fontweight="bold",
                 va="center", ha="right", alpha=0.95)
 
-        for slot, c in enumerate(qp.driver_chips(p, 3)):
+        for slot, c in enumerate(qp.driver_chips(p, N_CHIPS)):
             _chip(ax, slot, y + 1.12, c["label"], c["score"], c["helped"])
 
     # ── footer ─────────────────────────────────────────────────────────────────

@@ -357,8 +357,16 @@ def explain_picks(booster, X, live, feature_cols, top_n):
         # and reusing it here silently replaced the dict with this Series on the
         # first iteration, so the function returned a Series instead of the map.
         ranked = c.sort_values()
+        # Printed to the console: the three that matter, for a readable run log.
         tops = list(ranked.tail(3).items())[::-1]
         bots = [x for x in ranked.head(2).items() if x[1] < -0.004]
+        # Stored: everything. These are 16 small floats in a JSONB column, so the
+        # space saved by truncating is irrelevant, and the information lost is not.
+        # Storing only the top 3 meant that when a pick was asked "did improving
+        # margins contribute?", the honest answer was "we threw that away" - the
+        # feature sat 4th on half the top ten and never reached the database.
+        all_pos = [x for x in reversed(list(ranked.items())) if x[1] > 0]
+        all_neg = [x for x in ranked.items() if x[1] < 0]
         for f, v in tops:
             pv = X.loc[row.name, f]
             pv_s = f"{pv:.2f}" if isinstance(pv, (int, float, np.floating)) and pd.notna(pv) else str(pv)
@@ -375,9 +383,9 @@ def explain_picks(booster, X, live, feature_cols, top_n):
         drivers[row["ticker"]] = {
             "families": {k: round(v, 4) for k, v in fam.items() if abs(v) > 0.004},
             "positive": [{"feature": f, "contribution": round(v, 4), "percentile": _pct(f)}
-                         for f, v in tops],
+                         for f, v in all_pos],
             "negative": [{"feature": f, "contribution": round(v, 4), "percentile": _pct(f)}
-                         for f, v in bots],
+                         for f, v in all_neg],
         }
 
     return drivers
