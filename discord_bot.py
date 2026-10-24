@@ -324,26 +324,69 @@ async def _send_posts_with_charts(channel: discord.abc.Messageable, posts: list[
                         os.remove(chart_path)
 
 
+def _chunks(text: str, limit: int = 1900) -> list[str]:
+    """
+    Split text into Discord-sized pieces, breaking at the cleanest point available.
+
+    Paragraph breaks first, then line breaks, then a hard slice. The fallbacks
+    are the whole point: the previous version only split on blank lines and, on
+    hitting a single paragraph longer than the limit, assigned it to `current`
+    unchecked and sent it anyway. Discord answers an over-long message with a
+    400 rather than truncating it, so the send raised and everything after it in
+    the handler was skipped.
+
+    That stayed invisible until the news briefing grew, because its prompt asks
+    for no blank lines between the numbered items - which makes all five one
+    paragraph. The intro went out, the list did not, and the command died
+    silently in between.
+
+    A numbered list that has to be split breaks between items, which is what
+    the line-break pass gives us.
+    """
+    out, current = [], ""
+
+    def flush():
+        nonlocal current
+        if current.strip():
+            out.append(current.strip())
+        current = ""
+
+    def add(piece: str, sep: str):
+        nonlocal current
+        if len(current) + len(piece) + len(sep) <= limit:
+            current += (sep if current else "") + piece
+            return True
+        return False
+
+    for para in text.split("\n\n"):
+        if add(para, "\n\n"):
+            continue
+        flush()
+        if len(para) <= limit:
+            current = para
+            continue
+        for line in para.split("\n"):
+            if add(line, "\n"):
+                continue
+            flush()
+            while len(line) > limit:      # one line longer than a whole message
+                out.append(line[:limit])
+                line = line[limit:]
+            current = line
+    flush()
+    return out
+
+
 async def _send_long(channel: discord.abc.Messageable, text: str, reply_to: discord.Message | None = None) -> None:
-    """Send a message, splitting across multiple messages if over 2000 chars."""
-    if len(text) <= 2000:
-        if reply_to:
-            await reply_to.reply(text)
-        else:
-            await channel.send(text)
+    """Send a message, splitting across several if it is over Discord's limit."""
+    # Anything that already fits goes as one message. _chunks() works to 1900 to
+    # leave headroom, so without this a 1950-character post would be split in
+    # two for no reason.
+    if 0 < len(text) <= 2000:
+        await (reply_to.reply(text) if reply_to else channel.send(text))
         return
 
-    chunks, current = [], ""
-    for para in text.split("\n\n"):
-        if len(current) + len(para) + 2 > 1900:
-            chunks.append(current.strip())
-            current = para
-        else:
-            current += ("\n\n" if current else "") + para
-    if current:
-        chunks.append(current.strip())
-
-    for i, chunk in enumerate(chunks):
+    for i, chunk in enumerate(_chunks(text)):
         if i == 0 and reply_to:
             await reply_to.reply(chunk)
         else:
@@ -833,7 +876,7 @@ async def _build_daily_news_summary() -> tuple[str, int] | None:
         f"for over the next day or two. Then one closing line in character.\n\n"
 
         f"Ignore your usual 3-4 sentence limit — this is the daily briefing and "
-        f"it is meant to be meaty. Aim for 250 to 400 words total. Stay fully in "
+        f"it is meant to be meaty. Aim for 220 to 320 words total - it has to fit a single Discord message, so stay inside that. Stay fully in "
         f"character: punchy and conversational, but sharp and specific. No "
         f"hashtags. No blank lines between the numbered items. Start directly "
         f"with '1.' and no intro sentence before it.\n\n"
