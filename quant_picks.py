@@ -269,8 +269,14 @@ def model_blurb(picks: list[dict], size: int | None) -> str:
 
     Every number in it is derived rather than written down, so it cannot drift
     from the model the way a hardcoded description would. model_tag carries the
-    objective, the horizon and the tree count; the stored drivers carry the
-    feature count, now that 9_score.py keeps all of them instead of the top five.
+    objective and the horizon; the stored drivers carry the feature count, now
+    that 9_score.py keeps all of them instead of the top five.
+
+    The tree count is deliberately NOT here. It is an output of early stopping
+    rather than a design choice, it changes run to run (131, 170, 231 have all
+    appeared), and in a one-paragraph summary it reads as a specification -
+    inviting a question whose honest answer is "the data picked it". It stays in
+    model_tag for telling runs apart, and PROJECT.md explains the mechanism.
 
     NO PERFORMANCE NUMBER. It says what the model does, never what it returns.
 
@@ -284,7 +290,6 @@ def model_blurb(picks: list[dict], size: int | None) -> str:
     tag = (picks[0].get("model_tag") or "") if picks else ""
     kind = "ranking" if tag.startswith("lambdarank") else "classification"
     horizon = "3-month" if "_3m" in tag else "forward"
-    trees = tag.rsplit("_it", 1)[-1] if "_it" in tag else "?"
 
     n_feat = 0
     if picks:
@@ -297,7 +302,7 @@ def model_blurb(picks: list[dict], size: int | None) -> str:
     feats = f"{n_feat} factors" if n_feat else "a factor set"
 
     return (
-        f"A LightGBM {kind} model ({trees} trees) scores {universe} on {feats} "
+        f"A LightGBM {kind} model scores {universe} on {feats} "
         f"(momentum, valuation, quality, size) and orders them by expected "
         f"{horizon} return relative to the market, adjusted for volatility. "
         f"Trained on month-end data back to 2019. "
