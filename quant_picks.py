@@ -393,7 +393,7 @@ def model_blurb(picks: list[dict], size: int | None, snap=None) -> str:
             f"{horizon} horizon"]
 
     note = turnover_note(snap, len(picks)) if snap and picks else ""
-    tail = " ".join(x for x in (note, "`!model` for how it works.") if x)
+    tail = " ".join(x for x in (note, "`!model` for methodology.") if x)
     return "  ·  ".join(bits) + "\n" + tail
 
 
@@ -432,28 +432,34 @@ def _field(name: str, value: str) -> tuple[str, str]:
 
 def model_detail() -> tuple[dict | None, str | None]:
     """
-    The standing explanation, for !model. Returns (payload, error).
+    The standing methodology note, for !model. Returns (payload, error).
 
-    Sections as real embed FIELDS, not as bold text pretending to be headers.
-    Discord gives fields their own spacing and renders the name in its own
-    weight, so the sections read as sections. Faking it with `**What it is.**`
-    in front of a sentence produces the thing that got flagged as AI-written:
-    an essay wearing labels.
+    Register: a fund factsheet. Declarative, no contractions, correct technical
+    terms used rather than avoided, numbers with their units.
 
-    Two separate problems were in that first version and only one was the
-    layout. The prose was the other - an em dash per clause, every point framed
-    as "not X but Y", a closing aphorism. The fix for that was plain sentences
-    and contractions, and it stays fixed here; the sections coming back does not
-    license the voice coming back with them.
+    This took three passes and the two failure modes are worth recording,
+    because they pull in opposite directions and the obvious fix for one causes
+    the other.
 
-    Returns a payload rather than a discord.Embed so this module still needs no
+    1. "Sounds like AI wrote it." The cause was RHETORICAL STRUCTURE, not
+       vocabulary: a bolded label in front of every single sentence, an em dash
+       per clause, each point framed as "it does not do X, it does Y", and a
+       closing aphorism ("what the model did, which is not the same as saying it
+       was right"). That is the register of generated prose.
+
+    2. "Too casual or basic." Caused by fixing (1) the wrong way - flattening
+       everything to spoken English with contractions and vague quantifiers
+       ("a few valuation multiples", "the top 10 go up", "122 of them in here").
+       Plain is not the same as informal, and avoiding a term is not the same as
+       not padding around it.
+
+    So: formal register, precise terms (query group, cross-sectional, early
+    stopping), and NO rhetorical scaffolding. Sections are real embed fields, so
+    a header is a header rather than bold text imitating one.
+
+    Returns a payload rather than a discord.Embed, so this module still needs no
     discord.py import and can be read from a terminal, same as
     build_table_embed().
-
-    The tree count belongs in this command and not in the picks blurb. In a
-    one-line summary "(170 trees)" reads as a specification and invites a
-    question whose honest answer is "early stopping picked it"; given a sentence,
-    that answer is the interesting part.
 
     NO PERFORMANCE NUMBER here either - see model_blurb() for why.
     """
@@ -469,57 +475,57 @@ def model_detail() -> tuple[dict | None, str | None]:
 
     universe = f"the {size} TSX names" if size else "the TSX names"
     tree_bit = (
-        f" Training stops when a holdout set stops improving, so the number of "
-        f"trees is an output rather than a setting. That's the `it{trees}` on "
-        f"the end of the tag, and it moves around from run to run."
+        f" Tree count is set by early stopping rather than specified: training "
+        f"halts when performance on a held-out tail ceases to improve, which "
+        f"produced the `it{trees}` suffix in the model tag. The value varies "
+        f"between runs."
         if trees else "")
 
     fields = [
-        _field(f"The {len(feats)} factors",
-               "```\n" + ", ".join(feats) + "\n```\n"
-               "Momentum, a few valuation multiples, margins and margin trend, "
-               "cash flow and returns on capital, buybacks, growth, size. Most "
-               "are ranked against sector peers rather than used absolute."),
+        _field(f"Factor set ({len(feats)})",
+               "Momentum, valuation multiples, profitability, capital "
+               "allocation, growth and size. The majority are ranked "
+               "cross-sectionally within sector rather than applied on an "
+               "absolute basis.\n"
+               "```\n" + ", ".join(feats) + "\n```"),
 
         _field("Training",
-               f"Month-end data going back to 2019, refit from scratch on every "
-               f"run, so nothing carries over week to week.{tree_bit}"),
+               f"Fitted on month-end cross-sections from 2019 to the present, "
+               f"refit from scratch on each run with no state carried "
+               f"forward.{tree_bit}"),
 
-        _field("What's left out",
-               "Canadian Depositary Receipts. They're CAD-hedged wrappers on US "
-               "stocks, and there were 122 of them in here skewing every "
-               "sector-relative comparison."),
+        _field("Universe exclusions",
+               "Canadian Depositary Receipts are excluded. These are CAD-hedged "
+               "wrappers on US-listed companies rather than Canadian operating "
+               "businesses; 122 were present in the universe and were "
+               "distorting every sector-relative factor."),
 
-        # The scale warning is not pedantry. lambdarank's loss only compares
-        # names inside a query group (one month), and it is invariant to the
-        # overall level of a group's scores, so nothing in training pins the two
-        # months to a shared scale. Rank 1 scored 0.428 on one Sep 30 run and
-        # 1.078 on Oct 23; a 0.60 is rank 1 of 410 in the first and rank 5 in
-        # the other. Pooling months cost us a real wrong answer once already:
-        # decile monotonicity read -0.22 across pooled scores and +0.78 cut per
-        # month, same predictions. Rank and decile are the comparable fields.
-        _field("Reading the table",
-               "Scores only mean anything within one month, so don't read this "
-               "week's against September's. Compare ranks across weeks, not "
-               "scores. The chips on each row are that "
-               "stock's own factor attributions, biggest first. Cyan helped its "
-               "score, pink hurt it. That's what the model leaned on. It doesn't "
-               "mean it was right."),
+        _field("Interpretation",
+               "Scores are comparable only within a single month. The ranking "
+               "objective is defined over per-month query groups and is "
+               "invariant to the absolute level of scores within a group, so no "
+               "cross-month scale is established. Use rank rather than score "
+               "for week-over-week comparison.\n\n"
+               "Chips report each name's factor attributions, largest first. "
+               "Cyan denotes a positive contribution to the score, pink a "
+               "negative one. Attributions describe the inputs to the ranking "
+               "and are not a measure of forecast accuracy."),
     ]
 
     return {
-        "title": "LadBot — the model",
+        "title": "LadBot — Model Methodology",
         # "It's a LightGBM model, so gradient-boosted trees" was the first
-        # version, and it explained nothing: LightGBM is a library, gradient
-        # boosting is the algorithm inside it, and the "so" only parses if you
-        # already knew that. Naming both terms is not the same as saying what
-        # the thing does. One plain clause about the mechanism beats both names.
-        "intro": (f"It's built with LightGBM. The score comes from a stack of "
-                  f"small decision trees, each one trained to correct what the "
-                  f"ones before it got wrong, all added up. It's trained to "
-                  f"rank rather than to predict a return for each stock. Every "
-                  f"month it sorts {universe} it can score, and the top "
-                  f"{len(picks)} go up."),
+        # version and it explained nothing: LightGBM is a library, gradient
+        # boosting is the algorithm inside it, and the "so" only parses for a
+        # reader who already knew that. Naming both terms is not the same as
+        # stating the mechanism, so the mechanism is stated.
+        "intro": (f"A LightGBM gradient-boosted decision tree model. The score "
+                  f"is the summed output of a sequence of shallow trees, each "
+                  f"fitted to the gradient of the ranking loss left by those "
+                  f"preceding it. The objective is cross-sectional ranking "
+                  f"rather than return forecasting: each month the model orders "
+                  f"{universe} that clear the data-quality gates, and the top "
+                  f"{len(picks)} are published."),
         "fields": fields,
         "footer": f"{tag}  ·  snapshot {snap}",
         "color": 0xFF2D78,

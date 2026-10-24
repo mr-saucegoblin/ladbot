@@ -629,6 +629,16 @@ sections, and explains the mechanism (including the tree count, which belongs in
 sentence and not in a one-liner). What remains above the table is one derived identity
 line plus `turnover_note()`.
 
+**Register for published text: a fund factsheet.** Declarative, no contractions, precise
+terms used rather than dodged, numbers with units. This took three passes, and the two
+failure modes pull in opposite directions — the obvious fix for one causes the other.
+*Sounds AI-written* was caused by rhetorical structure, not vocabulary: a bolded label in
+front of every sentence, an em dash per clause, each point framed as "it does not do X, it
+does Y", and a closing aphorism. *Sounds too casual* was caused by fixing that the wrong
+way, flattening to spoken English with contractions and vague quantifiers ("a few valuation
+multiples", "the top 10 go up"). Plain is not the same as informal. Strip the scaffolding,
+keep the register formal. `model_detail()`'s docstring records both.
+
 `model_detail()` returns a payload of real embed **fields** rather than one string.
 Discord spaces fields and weights their names itself, so the sections read as sections;
 `**Header.**` glued to the front of a sentence is an essay wearing labels, and that is
