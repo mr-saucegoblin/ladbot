@@ -420,14 +420,22 @@ def model_detail() -> tuple[str | None, str | None]:
     """
     The standing explanation, for !model. Returns (text, error).
 
-    This is where the detail that used to sit above every table now lives. The
-    trade is deliberate: opt-in means it can afford to be four paragraphs and
-    explain the mechanism, where a line nobody asked for has to earn every word.
+    Written to sound like a person wrote it. The first version had a bolded
+    header over every single sentence, an em dash in most clauses, every point
+    framed as "not X but Y", and a closing aphorism ("what the model did, which
+    is not the same as saying it was right"). It read like documentation
+    generated about the model rather than a note from whoever built it.
 
-    The tree count belongs HERE and not in the picks blurb. In a one-line summary
-    "(170 trees)" reads as a specification and invites a question whose honest
-    answer is "the data picked it"; given a paragraph, that answer is the
-    interesting part.
+    What replaced it: plain sentences, contractions, no section headers, and the
+    factor list dumped raw instead of described in balanced prose. Short and flat
+    beats polished here.
+
+    The tree count belongs in this command and not in the picks blurb. In a
+    one-line summary "(170 trees)" reads as a specification and invites a
+    question whose honest answer is "early stopping picked it"; given a sentence,
+    that answer is the interesting part.
+
+    NO PERFORMANCE NUMBER here either - see model_blurb() for why.
     """
     picks, snap = load_latest_picks(10)
     if not picks:
@@ -439,35 +447,36 @@ def model_detail() -> tuple[str | None, str | None]:
     size = universe_size(snap)
     trees = tag.rsplit("_it", 1)[-1] if "_it" in tag else None
 
-    universe = f"{size} TSX main-board names" if size else "TSX main-board names"
+    universe = f"the {size} TSX names" if size else "the TSX names"
     tree_bit = (
-        f" The tree count is not a setting: training stops when a held-out tail "
-        f"stops improving, which is why `{tag}` ends in `_it{trees}` and why that "
-        f"number differs from one run to the next."
+        f"Training stops when a holdout set stops improving, so the number of "
+        f"trees is an output rather than a setting. That's the `it{trees}` on the "
+        f"end of the tag, and it moves around from run to run."
         if trees else "")
 
     return (
-        f"**What it is.** A LightGBM gradient-boosting model in `lambdarank` "
-        f"mode. It does not forecast a return for each stock — it learns to put "
-        f"one month's names in the right *order*, which is the question actually "
-        f"being asked when you want a top ten. Scores are only comparable inside "
-        f"a single month.\n\n"
+        f"It's a LightGBM model, so gradient-boosted trees. It's trained to rank "
+        f"rather than to predict a return for each stock. Every month it sorts "
+        f"{universe} it can score, and the top {len(picks)} go up. The scores "
+        f"only mean anything within one month, so don't read this week's against "
+        f"September's.\n\n"
 
-        f"**Universe.** {universe} that cleared the staleness and risk-metric "
-        f"gates. Canadian Depositary Receipts are excluded: they are CAD-hedged "
-        f"wrappers on US companies, not Canadian businesses, and 122 of them were "
-        f"sitting in the universe distorting every sector-relative factor.\n\n"
+        f"The {len(feats)} factors, named the way the code names them:\n"
+        f"```\n" + ", ".join(feats) + "\n```\n"
+        f"Momentum, a few valuation multiples, margins and margin trend, cash "
+        f"flow and returns on capital, buybacks, growth, size. Most are ranked "
+        f"against sector peers rather than used absolute.\n\n"
 
-        f"**Factors ({len(feats)}).** Momentum, valuation, quality and size, most "
-        f"of them ranked against sector peers rather than absolute:\n"
-        f"```\n" + ", ".join(feats) + "\n```\n\n"
+        f"It's trained on month-end data going back to 2019 and refit from "
+        f"scratch on every run, so nothing carries over week to week. {tree_bit}\n\n"
 
-        f"**Training.** Month-end snapshots back to 2019, retrained from scratch "
-        f"on every run — nothing carries over between weeks.{tree_bit}\n\n"
+        f"Canadian Depositary Receipts are left out. They're CAD-hedged wrappers "
+        f"on US stocks, and there were 122 of them in here skewing every "
+        f"sector-relative comparison.\n\n"
 
-        f"**The chips** on each row are that name's own factor attributions, "
-        f"largest first: cyan pushed its score up, pink pushed it down. They say "
-        f"what the model did, which is not the same as saying it was right."
+        f"The chips on each row are that stock's own factor attributions, biggest "
+        f"first. Cyan helped its score, pink hurt it. That's what the model leaned "
+        f"on. It doesn't mean it was right."
     ), None
 
 
