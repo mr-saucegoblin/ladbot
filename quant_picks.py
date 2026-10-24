@@ -416,19 +416,39 @@ def model_features(picks: list[dict]) -> list[str]:
     return sorted(set(names))
 
 
-def model_detail() -> tuple[str | None, str | None]:
+def _field(name: str, value: str) -> tuple[str, str]:
     """
-    The standing explanation, for !model. Returns (text, error).
+    One embed field, truncated to Discord's limit.
 
-    Written to sound like a person wrote it. The first version had a bolded
-    header over every single sentence, an em dash in most clauses, every point
-    framed as "not X but Y", and a closing aphorism ("what the model did, which
-    is not the same as saying it was right"). It read like documentation
-    generated about the model rather than a note from whoever built it.
+    A field value over 1024 characters does not get trimmed by Discord, it makes
+    the API reject the whole message - so !model would fail entirely rather than
+    print a slightly short factor list. The list is derived from whatever
+    9_score.py stored, so its length is not under this file's control.
+    """
+    if len(value) > 1024:
+        value = value[:1021].rstrip() + "..."
+    return (name[:256], value)
 
-    What replaced it: plain sentences, contractions, no section headers, and the
-    factor list dumped raw instead of described in balanced prose. Short and flat
-    beats polished here.
+
+def model_detail() -> tuple[dict | None, str | None]:
+    """
+    The standing explanation, for !model. Returns (payload, error).
+
+    Sections as real embed FIELDS, not as bold text pretending to be headers.
+    Discord gives fields their own spacing and renders the name in its own
+    weight, so the sections read as sections. Faking it with `**What it is.**`
+    in front of a sentence produces the thing that got flagged as AI-written:
+    an essay wearing labels.
+
+    Two separate problems were in that first version and only one was the
+    layout. The prose was the other - an em dash per clause, every point framed
+    as "not X but Y", a closing aphorism. The fix for that was plain sentences
+    and contractions, and it stays fixed here; the sections coming back does not
+    license the voice coming back with them.
+
+    Returns a payload rather than a discord.Embed so this module still needs no
+    discord.py import and can be read from a terminal, same as
+    build_table_embed().
 
     The tree count belongs in this command and not in the picks blurb. In a
     one-line summary "(170 trees)" reads as a specification and invites a
@@ -449,35 +469,45 @@ def model_detail() -> tuple[str | None, str | None]:
 
     universe = f"the {size} TSX names" if size else "the TSX names"
     tree_bit = (
-        f"Training stops when a holdout set stops improving, so the number of "
-        f"trees is an output rather than a setting. That's the `it{trees}` on the "
-        f"end of the tag, and it moves around from run to run."
+        f" Training stops when a holdout set stops improving, so the number of "
+        f"trees is an output rather than a setting. That's the `it{trees}` on "
+        f"the end of the tag, and it moves around from run to run."
         if trees else "")
 
-    return (
-        f"It's a LightGBM model, so gradient-boosted trees. It's trained to rank "
-        f"rather than to predict a return for each stock. Every month it sorts "
-        f"{universe} it can score, and the top {len(picks)} go up. The scores "
-        f"only mean anything within one month, so don't read this week's against "
-        f"September's.\n\n"
+    fields = [
+        _field(f"The {len(feats)} factors",
+               "```\n" + ", ".join(feats) + "\n```\n"
+               "Momentum, a few valuation multiples, margins and margin trend, "
+               "cash flow and returns on capital, buybacks, growth, size. Most "
+               "are ranked against sector peers rather than used absolute."),
 
-        f"The {len(feats)} factors, named the way the code names them:\n"
-        f"```\n" + ", ".join(feats) + "\n```\n"
-        f"Momentum, a few valuation multiples, margins and margin trend, cash "
-        f"flow and returns on capital, buybacks, growth, size. Most are ranked "
-        f"against sector peers rather than used absolute.\n\n"
+        _field("Training",
+               f"Month-end data going back to 2019, refit from scratch on every "
+               f"run, so nothing carries over week to week.{tree_bit}"),
 
-        f"It's trained on month-end data going back to 2019 and refit from "
-        f"scratch on every run, so nothing carries over week to week. {tree_bit}\n\n"
+        _field("What's left out",
+               "Canadian Depositary Receipts. They're CAD-hedged wrappers on US "
+               "stocks, and there were 122 of them in here skewing every "
+               "sector-relative comparison."),
 
-        f"Canadian Depositary Receipts are left out. They're CAD-hedged wrappers "
-        f"on US stocks, and there were 122 of them in here skewing every "
-        f"sector-relative comparison.\n\n"
+        _field("Reading the table",
+               "Scores only mean anything within one month, so don't read this "
+               "week's against September's. The chips on each row are that "
+               "stock's own factor attributions, biggest first. Cyan helped its "
+               "score, pink hurt it. That's what the model leaned on. It doesn't "
+               "mean it was right."),
+    ]
 
-        f"The chips on each row are that stock's own factor attributions, biggest "
-        f"first. Cyan helped its score, pink hurt it. That's what the model leaned "
-        f"on. It doesn't mean it was right."
-    ), None
+    return {
+        "title": "LadBot — the model",
+        "intro": (f"It's a LightGBM model, so gradient-boosted trees. It's "
+                  f"trained to rank rather than to predict a return for each "
+                  f"stock. Every month it sorts {universe} it can score, and "
+                  f"the top {len(picks)} go up."),
+        "fields": fields,
+        "footer": f"{tag}  ·  snapshot {snap}",
+        "color": 0xFF2D78,
+    }, None
 
 
 def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:

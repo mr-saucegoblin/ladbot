@@ -625,9 +625,19 @@ five-sentence paragraph describing the model, printed every week — identical e
 and therefore read about once. Worse than useless: it trains the eye to skip the space
 immediately above the table, which is the one place something that mattered would appear.
 So the standing description moved to **`!model`**, where it is opt-in, can afford four
-paragraphs, and explains the mechanism (including the tree count, which belongs in a
-paragraph and not in a one-liner). What remains above the table is one derived identity
+sections, and explains the mechanism (including the tree count, which belongs in a
+sentence and not in a one-liner). What remains above the table is one derived identity
 line plus `turnover_note()`.
+
+`model_detail()` returns a payload of real embed **fields** rather than one string.
+Discord spaces fields and weights their names itself, so the sections read as sections;
+`**Header.**` glued to the front of a sentence is an essay wearing labels, and that is
+what got the first draft flagged as AI-written. The prose was the other half of that —
+an em dash per clause, every point framed as "not X but Y", a closing aphorism — and the
+fix there was plain sentences and contractions. Sections returning does not license the
+voice returning with them. `_field()` truncates at 1024 characters because an over-long
+field value makes Discord reject the **whole message**, and the factor list is derived
+from whatever `9_score.py` stored.
 
 **Weekly turnover is usually zero, and that is the point.** Oct 16 → Oct 23 held all ten
 names and only shuffled the middle ranks. That follows directly from the factor set: 12-month

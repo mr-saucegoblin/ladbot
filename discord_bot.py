@@ -996,12 +996,24 @@ async def model_cmd(ctx: commands.Context):
     # Everything in it is derived from a stored prediction row, so it describes
     # the model that produced the current picks rather than the one that was
     # current when the text was written.
-    text, error = await asyncio.to_thread(quant_picks.model_detail)
+    payload, error = await asyncio.to_thread(quant_picks.model_detail)
     if error:
         await ctx.send(error)
         return
-    embed = discord.Embed(title="LadBot — the model", description=text,
-                          colour=0xFF2D78)
+
+    # Real embed fields, not bold text faking headers. Discord spaces fields and
+    # weights their names itself, so the sections read as sections; `**Header.**`
+    # glued to the front of a sentence is just an essay wearing labels.
+    #
+    # inline=False throughout. Inline fields sit three to a row at roughly a
+    # third of the width, which is right for short values and wrong for every
+    # value here - the factor list alone is a 16-item code block.
+    embed = discord.Embed(title=payload["title"],
+                          description=payload["intro"],
+                          colour=payload["color"])
+    for name, value in payload["fields"]:
+        embed.add_field(name=name, value=value, inline=False)
+    embed.set_footer(text=payload["footer"])
     await ctx.send(embed=embed)
 
 
