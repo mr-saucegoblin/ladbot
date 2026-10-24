@@ -269,6 +269,46 @@ and railways that this system doesn't pick from.
 
 ## Modelling Decisions
 
+**Why LightGBM.**
+
+*Tabular and small.* ~40k rows, 16 features. Gradient-boosted trees are the strongest
+tool class at this size; a neural net needs far more data and would lose.
+
+*Native missing-value handling.* Features run 3–18% null — `dynamic_ev_ebitda` is 17.7%,
+`gross_margin_trend` 10.3%. Most models force imputation, and imputing a valuation ratio
+means inventing a number for a company that does not have one. LightGBM learns a direction
+to send NaN at each split, so "no EV/EBITDA for this company" stays a fact instead of
+becoming a fabricated median.
+
+*Interactions for free.* The two most interesting findings in this data are both
+interactions: high ROIC hurting rather than helping, and dilution mattering only past about
+the 85th percentile. A linear model cannot represent either without someone knowing to write
+the term.
+
+*`lambdarank` fits the actual problem.* The task is "order these ~400 names within this
+month", not "predict each name's return". LightGBM supports learning-to-rank with query
+groups directly; most libraries do not.
+
+It is also fast on CPU, which matters because `9_score.py` retrains on every weekly run.
+
+**The tree count is an output, not a setting.**
+
+`model_tag` ends in `_itN` — `it170`, `it131`, `it231` have all appeared. Nobody picked
+those. `rounds` caps the search at 800, `early_stopping(100)` halts once validation has not
+improved for 100 consecutive rounds, and the booster rewinds to its best iteration. N is
+wherever that landed on that week's data, which is why it is in the tag: it distinguishes
+two runs over the same snapshot. The Discord blurb reads N out of the tag at post time, so
+it is never stated twice and cannot disagree with the model.
+
+**The model is deliberately crippled, and that is the point.**
+
+40,451 rows is not 40,451 observations. It is 90 monthly snapshots of *overlapping* 3-month
+returns — roughly 30 independent periods, 13 of them in the test window. `num_leaves` 31,
+`min_data_in_leaf` 200, `feature_fraction` 0.7, `bagging_fraction` 0.8 and `lambda_l2` 5.0
+are all constraints on how much it can memorise, chosen against the effective sample rather
+than the row count. A larger model fits this history better and predicts worse.
+
+
 **Target: `outperforms` = beat the MEDIAN stock on the same snapshot date.**
 
 Not `forward_return_3m > 0`. That version had no benchmark in it despite the name, and
