@@ -156,13 +156,14 @@ def render(picks, snap, scope, out_path=None) -> str:
     for i, p in enumerate(picks):
         y = 3.1 + i * LINES_PER_PICK
 
-        if i % 2 == 0:
-            ax.add_patch(FancyBboxPatch(
-                (X_LEFT - 1.4, y - 0.62), X_RIGHT - X_LEFT + 2.8,
-                LINES_PER_PICK - 0.12,
-                boxstyle="round,pad=0,rounding_size=0.2",
-                facecolor=_PANEL, edgecolor="none", zorder=0,
-            ))
+        # A rule under each pick rather than an alternating band. The band was
+        # meant to group an identity line with its chips, but at this opacity it
+        # barely reads, and a line does the same job more definitely: it closes
+        # the block rather than tinting it. Same colour and weight as the rule
+        # under the header, so the page has one kind of divider.
+        if i:
+            ax.plot([X_LEFT, X_RIGHT], [y - 0.95] * 2,
+                    color=_GRID, linewidth=1.0, zorder=0)
 
         ax.text(X_LEFT + 2.2, y, str(p["rank"]), color=_GOLD, fontsize=12,
                 fontfamily=MONO, fontweight="bold", va="center", ha="right",
