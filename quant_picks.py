@@ -500,10 +500,17 @@ def model_detail() -> tuple[dict | None, str | None]:
 
     return {
         "title": "LadBot — the model",
-        "intro": (f"It's a LightGBM model, so gradient-boosted trees. It's "
-                  f"trained to rank rather than to predict a return for each "
-                  f"stock. Every month it sorts {universe} it can score, and "
-                  f"the top {len(picks)} go up."),
+        # "It's a LightGBM model, so gradient-boosted trees" was the first
+        # version, and it explained nothing: LightGBM is a library, gradient
+        # boosting is the algorithm inside it, and the "so" only parses if you
+        # already knew that. Naming both terms is not the same as saying what
+        # the thing does. One plain clause about the mechanism beats both names.
+        "intro": (f"It's built with LightGBM. The score comes from a stack of "
+                  f"small decision trees, each one trained to correct what the "
+                  f"ones before it got wrong, all added up. It's trained to "
+                  f"rank rather than to predict a return for each stock. Every "
+                  f"month it sorts {universe} it can score, and the top "
+                  f"{len(picks)} go up."),
         "fields": fields,
         "footer": f"{tag}  ·  snapshot {snap}",
         "color": 0xFF2D78,
