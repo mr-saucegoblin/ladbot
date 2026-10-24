@@ -490,7 +490,12 @@ async def _send_picks_table(channel, count: int = 10) -> str | None:
     try:
         img, img_err = await asyncio.to_thread(table_image.render_latest, count)
         if img and not img_err:
-            embed = discord.Embed(title=payload["title"], colour=payload["color"])
+            # The blurb goes in `description`, which the image path leaves empty,
+            # so it sits between the title and the picture - read before the
+            # table rather than after it, which is where a footer would put it.
+            embed = discord.Embed(title=payload["title"],
+                                  description=payload.get("blurb"),
+                                  colour=payload["color"])
             embed.set_image(url="attachment://picks.png")
             embed.set_footer(text=payload["footer"])
             try:
@@ -502,7 +507,10 @@ async def _send_picks_table(channel, count: int = 10) -> str | None:
     except Exception as e:
         print(f"[picks] table image failed, falling back to text: {e}")
 
-    embed = discord.Embed(title=payload["title"], description=payload["body"],
+    # Text fallback: the blurb precedes the ``ansi`` fence in the same field.
+    blurb = payload.get("blurb")
+    body = (blurb + "\n\n" + payload["body"]) if blurb else payload["body"]
+    embed = discord.Embed(title=payload["title"], description=body,
                           colour=payload["color"])
     embed.set_footer(text=payload["footer"])
     await channel.send(embed=embed)
