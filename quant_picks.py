@@ -263,51 +263,212 @@ def _driver_cells(pick: dict, n: int = 2):
     return [_cell(x) for x in pos]
 
 
-def model_blurb(picks: list[dict], size: int | None) -> str:
+def turnover(snap, n: int = 10) -> dict | None:
     """
-    One short paragraph describing what produced these picks.
+    How the top n changed since the previous scored snapshot.
 
-    Every number in it is derived rather than written down, so it cannot drift
-    from the model the way a hardcoded description would. model_tag carries the
-    objective and the horizon; the stored drivers carry the feature count, now
-    that 9_score.py keeps all of them instead of the top five.
+    Returns {"prev": date, "entered": [...], "exited": [...], "reordered": bool},
+    or None when there is nothing to compare against — or when the query fails,
+    because a decoration on a Discord post must never be the thing that stops the
+    post going out.
 
-    The tree count is deliberately NOT here. It is an output of early stopping
-    rather than a design choice, it changes run to run (131, 170, 231 have all
-    appeared), and in a one-paragraph summary it reads as a specification -
-    inviting a question whose honest answer is "the data picked it". It stays in
-    model_tag for telling runs apart, and PROJECT.md explains the mechanism.
+    Worth knowing before reading the output: the answer is usually "nothing
+    changed". The factors are 12-month momentum, TTM margins and quarterly
+    fundamentals, so a weekly re-score has almost no new information to act on —
+    Oct 16 to Oct 23 held all ten names and only shuffled the middle ranks. That
+    is a property of a 3-month-horizon model, not a fault, and it is exactly why
+    the line is worth printing: the week it says something other than "unchanged"
+    is the week a holder needs to look.
 
-    NO PERFORMANCE NUMBER. It says what the model does, never what it returns.
+    The comparison is against the previous SNAPSHOT, not against "last week", and
+    it prints that date. If a Friday run is ever skipped, the honest statement is
+    "unchanged since Oct 16", not a claim about a week that was never scored.
+    """
+    try:
+        conn = _conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT MAX(snapshot_date) AS d FROM predictions "
+                            "WHERE snapshot_date < %s", (snap,))
+                row = cur.fetchone()
+                prev = row["d"] if row else None
+                if prev is None:
+                    return None
 
-    An earlier version quoted "roughly 2-3.5% per quarter" from the backtest.
-    Deliberately removed: in a chat post a historical range is read as a
-    forecast, and that one rests on 40 overlapping months - about 13 independent
-    periods - with feature selection that used test-window data. Describing the
-    method is defensible; publishing an expected return is not, and this is the
-    wrong surface to carry the caveats that would make it so.
+                def top(d):
+                    # Same one-model-run filter as load_latest_picks(): a single
+                    # snapshot_date can hold several model_tags (2026-09-30 holds
+                    # two), and mixing them would report phantom turnover.
+                    cur.execute("""
+                        WITH latest AS (
+                            SELECT model_tag FROM predictions
+                            WHERE snapshot_date = %s
+                            GROUP BY model_tag
+                            ORDER BY MAX(created_at) DESC
+                            LIMIT 1
+                        )
+                        SELECT ticker FROM predictions
+                        WHERE snapshot_date = %s
+                          AND model_tag = (SELECT model_tag FROM latest)
+                        ORDER BY rank
+                        LIMIT %s
+                    """, (d, d, n))
+                    return [r["ticker"] for r in cur.fetchall()]
+
+                now, before = top(snap), top(prev)
+                if not now or not before:
+                    return None
+                return {
+                    "prev": prev,
+                    "entered": [t for t in now if t not in before],
+                    "exited": [t for t in before if t not in now],
+                    "reordered": now != before,
+                }
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
+def turnover_note(snap, n: int = 10) -> str:
+    """
+    The one line in the picks post that is allowed to differ week to week.
+
+    Everything else above the table — model type, universe size, horizon — is the
+    same every Friday, which is why it has been cut to a single line and the rest
+    moved to !model. A paragraph nobody's eye stops on is worse than no paragraph.
+    """
+    t = turnover(snap, n)
+    if not t:
+        return ""
+
+    # "Oct 16", not "Oct 16" zero-padded: %d gives "Oct 06" for single digits.
+    when = f"{t['prev']:%b} {t['prev'].day}"
+    short = lambda ts: ", ".join(x.removesuffix(".TO") for x in ts)
+
+    if not t["entered"] and not t["exited"]:
+        return (f"Same {n} names as {when}, reordered." if t["reordered"]
+                else f"Unchanged since {when}.")
+
+    k = max(len(t["entered"]), len(t["exited"]))
+    parts = [f"{k} change{'' if k == 1 else 's'} since {when}"]
+    if t["entered"]:
+        parts.append(f"in {short(t['entered'])}")
+    if t["exited"]:
+        parts.append(f"out {short(t['exited'])}")
+    return " — ".join([parts[0], "  ·  ".join(parts[1:])])
+
+
+def model_blurb(picks: list[dict], size: int | None, snap=None) -> str:
+    """
+    Two short lines above the table: what the model is, and what moved.
+
+    This was a five-sentence paragraph, and it was the same five sentences every
+    week. Read once it is informative; read weekly it is wallpaper, and wallpaper
+    above the table trains people to skip the space where something that mattered
+    might one day appear. So the standing description moved to !model, where it is
+    read on purpose, and what is left is one identity line plus turnover_note() —
+    the only part with any reason to change.
+
+    Every value is still derived rather than written down, so it cannot drift from
+    the model the way a hardcoded description would. model_tag carries the
+    objective and the horizon; the stored drivers carry the factor count.
+
+    NO PERFORMANCE NUMBER, here or in model_detail(). An earlier version quoted
+    "roughly 2-3.5% per quarter" from the backtest. Deliberately removed: in a
+    chat post a historical range is read as a forecast, and that one rests on 40
+    overlapping months — about 13 independent periods — with feature selection
+    that used test-window data. Describing the method is defensible; publishing an
+    expected return is not, and this is the wrong surface for the caveats that
+    would make it so.
     """
     tag = (picks[0].get("model_tag") or "") if picks else ""
     kind = "ranking" if tag.startswith("lambdarank") else "classification"
     horizon = "3-month" if "_3m" in tag else "forward"
+    n_feat = len(model_features(picks))
 
-    n_feat = 0
-    if picks:
-        d = picks[0].get("drivers") or {}
-        if isinstance(d, str):
-            d = json.loads(d)
-        n_feat = len(d.get("positive") or []) + len(d.get("negative") or [])
+    bits = [f"LightGBM {kind} model",
+            f"{size} TSX names" if size else "TSX main board",
+            f"{n_feat} factors" if n_feat else "a factor set",
+            f"{horizon} horizon"]
 
-    universe = f"{size} TSX names" if size else "the TSX main board"
-    feats = f"{n_feat} factors" if n_feat else "a factor set"
+    note = turnover_note(snap, len(picks)) if snap and picks else ""
+    tail = " ".join(x for x in (note, "`!model` for how it works.") if x)
+    return "  ·  ".join(bits) + "\n" + tail
+
+
+def model_features(picks: list[dict]) -> list[str]:
+    """
+    The factors the model actually used, read back off a stored prediction.
+
+    Derived rather than listed, for the same reason universe_size() is queried:
+    a hardcoded set of 16 names survives exactly until the next feature cut. Any
+    pick carries all of them now that 9_score.py stores every contribution
+    instead of the top five.
+    """
+    if not picks:
+        return []
+    d = picks[0].get("drivers") or {}
+    if isinstance(d, str):
+        d = json.loads(d)
+    names = [x["feature"] for x in (d.get("positive") or [])]
+    names += [x["feature"] for x in (d.get("negative") or [])]
+    return sorted(set(names))
+
+
+def model_detail() -> tuple[str | None, str | None]:
+    """
+    The standing explanation, for !model. Returns (text, error).
+
+    This is where the detail that used to sit above every table now lives. The
+    trade is deliberate: opt-in means it can afford to be four paragraphs and
+    explain the mechanism, where a line nobody asked for has to earn every word.
+
+    The tree count belongs HERE and not in the picks blurb. In a one-line summary
+    "(170 trees)" reads as a specification and invites a question whose honest
+    answer is "the data picked it"; given a paragraph, that answer is the
+    interesting part.
+    """
+    picks, snap = load_latest_picks(10)
+    if not picks:
+        return None, ("No scored picks yet - run `9_score.py --save` "
+                      "to publish a snapshot.")
+
+    tag = picks[0].get("model_tag") or ""
+    feats = model_features(picks)
+    size = universe_size(snap)
+    trees = tag.rsplit("_it", 1)[-1] if "_it" in tag else None
+
+    universe = f"{size} TSX main-board names" if size else "TSX main-board names"
+    tree_bit = (
+        f" The tree count is not a setting: training stops when a held-out tail "
+        f"stops improving, which is why `{tag}` ends in `_it{trees}` and why that "
+        f"number differs from one run to the next."
+        if trees else "")
 
     return (
-        f"A LightGBM {kind} model scores {universe} on {feats} "
-        f"(momentum, valuation, quality, size) and orders them by expected "
-        f"{horizon} return relative to the market, adjusted for volatility. "
-        f"Trained on month-end data back to 2019. "
-        f"Chips show the factors that moved each score most."
-    )
+        f"**What it is.** A LightGBM gradient-boosting model in `lambdarank` "
+        f"mode. It does not forecast a return for each stock — it learns to put "
+        f"one month's names in the right *order*, which is the question actually "
+        f"being asked when you want a top ten. Scores are only comparable inside "
+        f"a single month.\n\n"
+
+        f"**Universe.** {universe} that cleared the staleness and risk-metric "
+        f"gates. Canadian Depositary Receipts are excluded: they are CAD-hedged "
+        f"wrappers on US companies, not Canadian businesses, and 122 of them were "
+        f"sitting in the universe distorting every sector-relative factor.\n\n"
+
+        f"**Factors ({len(feats)}).** Momentum, valuation, quality and size, most "
+        f"of them ranked against sector peers rather than absolute:\n"
+        f"```\n" + ", ".join(feats) + "\n```\n\n"
+
+        f"**Training.** Month-end snapshots back to 2019, retrained from scratch "
+        f"on every run — nothing carries over between weeks.{tree_bit}\n\n"
+
+        f"**The chips** on each row are that name's own factor attributions, "
+        f"largest first: cyan pushed its score up, pink pushed it down. They say "
+        f"what the model did, which is not the same as saying it was right."
+    ), None
 
 
 def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
@@ -341,7 +502,7 @@ def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
     scope = f"ranked {size} TSX names" if size else "TSX main board"
     return {
         "title": f"LadBot \u2014 Top {len(picks)} Holdings",
-        "blurb": model_blurb(picks, size),
+        "blurb": model_blurb(picks, size, snap),
         "body": "```ansi\n" + "\n".join(rows) + "\n```",
         "footer": (f"{snap}  \u00b7  {scope}  \u00b7  score = how strongly it "
                    f"shows that trait (0-100 vs sector)"),

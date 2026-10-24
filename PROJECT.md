@@ -620,6 +620,27 @@ reader.
 `!picks` takes no argument. `PICKS_COUNT` is the single knob, read by both the command and
 the Sunday post.
 
+**The text above the table is split by how often it changes.** The first version was a
+five-sentence paragraph describing the model, printed every week — identical every week,
+and therefore read about once. Worse than useless: it trains the eye to skip the space
+immediately above the table, which is the one place something that mattered would appear.
+So the standing description moved to **`!model`**, where it is opt-in, can afford four
+paragraphs, and explains the mechanism (including the tree count, which belongs in a
+paragraph and not in a one-liner). What remains above the table is one derived identity
+line plus `turnover_note()`.
+
+**Weekly turnover is usually zero, and that is the point.** Oct 16 → Oct 23 held all ten
+names and only shuffled the middle ranks. That follows directly from the factor set: 12-month
+momentum, TTM margins and quarterly fundamentals carry almost no new information across seven
+days, so a weekly re-score re-derives nearly the same ordering. It is a property of a
+3-month-horizon model rather than a bug — and it is exactly why `Unchanged since Oct 16` is
+worth one line. For a holder, "nothing changed, don't trade" is the useful answer, and the
+week the line says otherwise is the week they need to read it.
+
+A consequence worth noting: running the pipeline weekly buys little over running it monthly.
+It stays weekly because it is cheap (50 min, unattended) and because a weekly run surfaces a
+broken step within days instead of within a month.
+
 ---
 
 ## Coding Conventions

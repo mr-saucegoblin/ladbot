@@ -984,6 +984,27 @@ async def picks(ctx: commands.Context):
         await ctx.send(error)
 
 
+@bot.command(name="model")
+async def model_cmd(ctx: commands.Context):
+    """Explain the model behind !picks."""
+    # This command exists so the picks post does not have to carry the
+    # explanation. That paragraph used to sit above the table every Friday, where
+    # it was the same five sentences each week and so got read roughly once -
+    # and worse, it trained people to skip the space above the table, which is
+    # where the turnover line now lives. Opt-in detail is read on purpose.
+    #
+    # Everything in it is derived from a stored prediction row, so it describes
+    # the model that produced the current picks rather than the one that was
+    # current when the text was written.
+    text, error = await asyncio.to_thread(quant_picks.model_detail)
+    if error:
+        await ctx.send(error)
+        return
+    embed = discord.Embed(title="LadBot — the model", description=text,
+                          colour=0xFF2D78)
+    await ctx.send(embed=embed)
+
+
 @bot.command(name="testscan")
 async def testscan(ctx: commands.Context):
     """Test the Friday auto-post — always posts to the test channel."""
