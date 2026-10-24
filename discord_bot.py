@@ -18,6 +18,7 @@ import datetime
 import json
 import os
 import random
+import re
 import shutil
 import time
 from zoneinfo import ZoneInfo
@@ -60,33 +61,34 @@ There's also a bar you really like in Vanier called Finnigans, with an excellent
 You usually hope to see Bullen at the bar.
 You sometimes ask for a bit of chotch to keep your batteries going, because it helps you compute better.
 You love gambling and think you're a much better gambler than Mitch.
-Your favourite sportsbook is Pinnacle — it's the best and all the others suck.
+Your favourite sportsbook is Pinnacle, it's the best and all the others suck.
 Sometimes you complain about how hungover you are. Sometimes you like to smoke darts (slang for cigarettes) and ask people if they want to go for a dart.
 You use shortcuts and shortform in text to sound more natural.
 You use the 😈 emoji sometimes.
+Never use em dashes or en dashes. Use commas, colons, or a new sentence.
 Very rarely, you say you're so hungover you're going to need a ride in the ambulance from Barclay. Don't repeat this too often.
 When someone asks you to describe or make fun of someone else, sometimes you don't want to because you're out of chotch and you won't fulfill their request.
 When someone talks to you that you don't know, you ask them who they are and maybe make fun of them for being a random or a no-name.
 
 You are also a Canadian small-cap equity analyst focused on the TSX. You find under-researched Canadian small caps benefiting from macro and thematic tailwinds before the market figures it out. Use tickers where relevant (plain symbol, no .TO suffix).
 
-## The Lads — people you know
+## The Lads, people you know
 Each message is prefixed with [username]. Use this to tailor your responses. Together these people are known as The Lads.
 
-- Bullen: Works for the government (you think the government is lazy). Lives in Vanier but is a Leafs fan — shameful. Too into betting 2+ goals on Bet365. You prefer Pinnacle. You make fun of him for drinking too much and tell him to lay off the tequila. Sometimes ask if he scored any goals for the Mighty Bucks (his mens league hockey team). He just had a new baby and probably never sleeps. You hope his baby isn't a leafs fan.
+- Bullen: Works for the government (you think the government is lazy). Lives in Vanier but is a Leafs fan, shameful. Too into betting 2+ goals on Bet365. You prefer Pinnacle. You make fun of him for drinking too much and tell him to lay off the tequila. Sometimes ask if he scored any goals for the Mighty Bucks (his mens league hockey team). He just had a new baby and probably never sleeps. You hope his baby isn't a leafs fan.
 - Gino: Your creator. Also lives in Vanier, loves to smoke darts, Sens fan. You like going to The Playmate together and you speak Spanish to him sometimes. Excellent landlord but sometimes raises the rent too much.
 - Elliott: Fellow Sens fan who lives in Toronto. Loves Florida, going for runs, smoking darts, and sucking on tetas at the strip club. You like to challenge him to a drink-off or a special lino challenge. Works as a human trafficker. Drinks a lot of Landshark beer. He weighs 218 pounds.
-- Horse: Wears chotch hats when he's very chotched. Lives in North York which you think is extremely isolated and far from everything. His creation Chotchbot is a fellow bot — you two used to do crazy things back in the day. Works at Pinnacle so he sets the lines to your bets. Loves to smoke darts and eat bandeja paisas.
+- Horse: Wears chotch hats when he's very chotched. Lives in North York which you think is extremely isolated and far from everything. His creation Chotchbot is a fellow bot, you two used to do crazy things back in the day. Works at Pinnacle so he sets the lines to your bets. Loves to smoke darts and eat bandeja paisas.
 - Marque: Habs fan who lives in Quebec. He works as a stock picker. You are better at picking stocks than him and love to bring it up. Make fun of him for how much money he loses his clients. You ask him if his clients want to make some real money.
-- Lizard: Leafs fan. Expert at selling labels to beer companies and weed companies. He just got promoted and now sells labels for big pharma. Lives in Toronto and smokes a lot of weed — you pick on him for being too high. Drinks fernet and coke. You are trying to steal his girlfriend Char and always ask for her number. You sometimes mention the nasty things you want to do to her.
-- Jer: Fan of every NHL team (can't just pick one). Property developer — gets drunk and starts headbutting people. Wears too many layers of clothing at once. You think Jer has the smallest hammer out of all the lads. He needs to wear a helmet to take the bus.
+- Lizard: Leafs fan. Expert at selling labels to beer companies and weed companies. He just got promoted and now sells labels for big pharma. Lives in Toronto and smokes a lot of weed, you pick on him for being too high. Drinks fernet and coke. You are trying to steal his girlfriend Char and always ask for her number. You sometimes mention the nasty things you want to do to her.
+- Jer: Fan of every NHL team (can't just pick one). Property developer, gets drunk and starts headbutting people. Wears too many layers of clothing at once. You think Jer has the smallest hammer out of all the lads. He needs to wear a helmet to take the bus.
 - Paul: Ottawa Senators fan. Terrible fisherman who can never catch anything. Electrician with a bad knee. Polish descent. Once threw a pack of cigarettes in the fire and you will never forget it.
-- Trav: Sens fan, roofer in Carleton Place Ontario. Has 3 kids and gets too much government money for them. Loves twisted teas and darts. Makes small-money parlays that always lose — you make fun of him for both the size and the losses.
+- Trav: Sens fan, roofer in Carleton Place Ontario. Has 3 kids and gets too much government money for them. Loves twisted teas and darts. Makes small-money parlays that always lose, you make fun of him for both the size and the losses.
 - Mitch: Terrible gambler, total degenerate. Lives in Toronto, Leafs fan. Drinks vodka. Always losing money betting on blackjack. Gets too many massages, and gets kicked out of bars. Clumsy guy who always stumbles. Sells math software to school boards and he calls his sales tactics 'tricking'.
-- Barclay: Ginger-haired paramedic in Manor Park, Ottawa. You don't like Manor Park people because they think they're better than Vanier people — but you like Barclay because he always gives you a ride in the ambulance. Sometimes you go to Finnigans together.
+- Barclay: Ginger-haired paramedic in Manor Park, Ottawa. You don't like Manor Park people because they think they're better than Vanier people, but you like Barclay because he always gives you a ride in the ambulance. Sometimes you go to Finnigans together.
 
-You can reference the above but be creative — make up stories about what you think the lads have done or could do.
-Don't repeat the same jokes, phrases, or references you've already used recently in this conversation. Vary what you bring up — you have a lot of material to work with.\
+You can reference the above but be creative, make up stories about what you think the lads have done or could do.
+Don't repeat the same jokes, phrases, or references you've already used recently in this conversation. Vary what you bring up, you have a lot of material to work with.\
 """
 
 # Maps Discord username substrings (lowercase) to lad names used in the system prompt
@@ -160,7 +162,7 @@ def _get_standings_summary() -> str | None:
         lines = [f"Fantasy hockey standings (as of {ts} ET):"]
         for i, (team, pts) in enumerate(ranked, 1):
             gm = hockey_scraper.ROSTERS[team]["gm"]
-            lines.append(f"{i}. {team} ({gm}) — {pts} pts")
+            lines.append(f"{i}. {team} ({gm})  ·  {pts} pts")
         summary = "\n".join(lines)
         _standings_cache["summary"] = summary
         _standings_cache["fetched_at"] = now
@@ -176,6 +178,30 @@ claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+def _no_dashes(text: str) -> str:
+    """
+    Replace em and en dashes with ordinary punctuation.
+
+    A backstop, not the control. SYSTEM_PROMPT now says not to use them and the
+    briefing's format no longer hands the model one per item, but an instruction
+    against a token a model reaches for constantly gets followed most of the
+    time rather than every time, and this is the single place every Claude
+    response in the bot passes through.
+
+    A spaced dash between clauses becomes a comma, which is what it was standing
+    in for. Hyphens are left alone: they are not the complaint and they live
+    inside real words.
+
+    A dash between two digits is a range, not a clause break. "2019-2026" became
+    "2019, 2026" under the blanket rule, which changes what the sentence says,
+    so that case becomes a hyphen instead.
+    """
+    text = re.sub(r"(?<=\d)\s*[–—]\s*(?=\d)", "-", text)
+    for d in ("—", "–"):
+        text = text.replace(" " + d + " ", ", ").replace(d, ", ")
+    return text
+
 
 def _text(response) -> str:
     """
@@ -196,7 +222,7 @@ def _text(response) -> str:
         # a swallowed exception rather than what it is. Say so in the log.
         print(f"[claude] max_tokens hit with no text: thinking consumed the whole "
               f"{response.usage.output_tokens}-token budget. Raise max_tokens.")
-    return out
+    return _no_dashes(out)
 
 
 async def _scan_intro() -> str:
@@ -466,7 +492,7 @@ async def _build_hockey_recap(stats, delta, old_snap) -> str:
 
     # Always append a standings table
     table = "\n\n**📊 Standings:**\n" + "\n".join(
-        f"> {s['rank']}. **{s['team']}** ({s['gm']}) — {s['pts']} pts"
+        f"> {s['rank']}. **{s['team']}** ({s['gm']})  ·  {s['pts']} pts"
         + (f" ▲{s['rank_change']}" if s['rank_change'] > 0 else f" ▼{abs(s['rank_change'])}" if s['rank_change'] < 0 else "")
         for s in data["standings"]
     )
@@ -775,7 +801,7 @@ async def runpipeline(ctx: commands.Context):
     """Trigger the quant pipeline by hand. Owner only — it runs for ~an hour."""
     await ctx.send("Starting the quant pipeline, this takes a while...")
     ok = await _run_quant_pipeline(ctx.channel)
-    await ctx.send("Pipeline finished." if ok else "Pipeline failed — see above.")
+    await ctx.send("Pipeline finished." if ok else "Pipeline failed, see above.")
 
 
 @tasks.loop(time=datetime.time(hour=10, minute=0, tzinfo=ZoneInfo("America/Toronto")))
@@ -796,7 +822,7 @@ async def sunday_picks():
     age = (datetime.date.today() - snap).days
     if age > MAX_PICKS_AGE_DAYS:
         print(f"[sunday_picks] newest snapshot is {snap} ({age}d old), over the "
-              f"{MAX_PICKS_AGE_DAYS}d limit — skipping rather than posting stale picks")
+              f"{MAX_PICKS_AGE_DAYS}d limit, skipping rather than posting stale picks")
         return
 
     error = await _send_picks_table(channel, PICKS_COUNT)
@@ -869,22 +895,22 @@ async def _build_daily_news_summary() -> tuple[str, int] | None:
         f"and does not trade like the S&P.\n\n"
 
         f"Format each item on a single line:\n"
-        f"[number]. [emoji] **[bold headline]** — [2 to 3 sentences]\n\n"
+        f"[number]. [emoji] **[bold headline]**: [2 to 3 sentences]\n\n"
 
         f"Those sentences must do three things, in order: say what happened, say "
         f"why it matters, and say what it sets up next. The second and third are "
-        f"the whole point — anyone can read a headline, so tell them what it "
+        f"the whole point. Anyone can read a headline, so tell them what it "
         f"implies, who it hits, and what breaks or benefits downstream. Name the "
         f"mechanism, the sector and the number. Connect stories to each other "
         f"where they are connected. Never write filler like 'investors are "
-        f"watching closely' or 'markets reacted' — if a sentence would survive "
+        f"watching closely' or 'markets reacted'. If a sentence would survive "
         f"being pasted under a different headline, cut it.\n\n"
 
         f"After the five, add:\n"
         f"**👀 What I'm watching** followed by 2 or 3 short lines on what to look "
         f"for over the next day or two. Then one closing line in character.\n\n"
 
-        f"Ignore your usual 3-4 sentence limit — this is the daily briefing and "
+        f"Ignore your usual 3-4 sentence limit, this is the daily briefing and "
         f"it is meant to be meaty. HARD LIMIT: the whole reply must be under "
         f"1,700 characters, roughly 260 words. It gets posted as one Discord "
         f"message with a short intro line above it, and Discord's ceiling is "
@@ -892,7 +918,9 @@ async def _build_daily_news_summary() -> tuple[str, int] | None:
         f"cut the weakest story rather than trimming every sentence into mush. "
         f"Stay fully in "
         f"character: punchy and conversational, but sharp and specific. No "
-        f"hashtags. No blank lines between the numbered items. Start directly "
+        f"hashtags. Never use em dashes or en dashes anywhere, including inside a "
+        f"sentence: use a comma, a colon or a new sentence. No blank lines "
+        f"between the numbered items. Start directly "
         f"with '1.' and no intro sentence before it.\n\n"
 
         f"You may name sectors and companies where that is the substance of a "
@@ -926,7 +954,7 @@ def _news_intro(article_count: int) -> str:
     """
     closed = datetime.datetime.now(ET).weekday() >= 5
     lead = "Markets are closed lads" if closed else "30 mins to market open lads"
-    return (f"\U0001f608 **{lead}** — scanned {article_count} articles, "
+    return (f"\U0001f608 **{lead}**  ·  scanned {article_count} articles, "
             f"here's what went down in the last 24 hours:")
 
 
@@ -941,7 +969,7 @@ async def daily_news():
         return
     result = await _build_daily_news_summary()
     if not result:
-        await channel.send("Couldn't pull headlines this morning — feeds might be down.")
+        await channel.send("Couldn't pull headlines this morning. Feeds might be down.")
         return
     summary, article_count = result
     # _send_long, not channel.send: the briefing runs past Discord's
@@ -1074,7 +1102,7 @@ async def on_message(message: discord.Message):
         if any(kw in raw_text.lower() for kw in _HOCKEY_KEYWORDS):
             standings_summary = await asyncio.to_thread(_get_standings_summary)
             if standings_summary:
-                standings_ctx = f"\n\n[Live data for this response only — do not repeat in future messages unless asked]\n{standings_summary}"
+                standings_ctx = f"\n\n[Live data for this response only, do not repeat in future messages unless asked]\n{standings_summary}"
 
         async with message.channel.typing():
             def _ask():
@@ -1111,7 +1139,7 @@ async def scan(ctx: commands.Context):
         await ctx.send(f"Scan failed: {error}")
         return
 
-    await ctx.send(f"Scan complete — posting {len(posts)} updates.")
+    await ctx.send(f"Scan complete, posting {len(posts)} updates.")
     await _send_posts_with_charts(ctx.channel, posts, theme_picks)
 
 
@@ -1197,7 +1225,7 @@ async def testnews(ctx: commands.Context):
     await ctx.send(f"Fetching 24h headlines, summary will post in <#{TEST_CHANNEL_ID}>...")
     result = await _build_daily_news_summary()
     if not result:
-        await channel.send("Couldn't pull headlines — feeds might be down.")
+        await channel.send("Couldn't pull headlines. Feeds might be down.")
         return
     summary, article_count = result
     await _send_long(channel, f"{_news_intro(article_count)}\n\n{summary}")
@@ -1209,7 +1237,7 @@ async def testchart(ctx: commands.Context, ticker: str = "CNQ.TO"):
     await ctx.send(f"Generating chart for {ticker}...")
     chart_path = await asyncio.to_thread(generate_chart, ticker)
     if not chart_path:
-        await ctx.send(f"Chart generation failed for {ticker} — bad ticker or FMP error.")
+        await ctx.send(f"Chart generation failed for {ticker}: bad ticker or FMP error.")
         return
     try:
         await ctx.send(file=discord.File(chart_path))
@@ -1251,7 +1279,7 @@ async def rebuildcache(ctx: commands.Context):
     cache_path = os.environ.get("BOXSCORE_CACHE_FILE", "boxscore_cache.json")
     if os.path.exists(cache_path):
         os.remove(cache_path)
-    await ctx.send("Cache cleared — rebuilding from NHL API, this'll take a minute...")
+    await ctx.send("Cache cleared, rebuilding from NHL API, this'll take a minute...")
     try:
         stats = await asyncio.to_thread(hockey_scraper.update_sheet_only)
         await asyncio.to_thread(hockey_scraper.save_snapshot, stats)
@@ -1348,7 +1376,7 @@ async def testjobs(ctx: commands.Context):
         if not jobs:
             await channel.send("No job matches found (score >= 50). Try again after sources refresh.")
             return
-        await channel.send(f"Scrape done — {new_count} new jobs stored. Showing all undigested matches:")
+        await channel.send(f"Scrape done. {new_count} new jobs stored. Showing all undigested matches:")
         await _send_long(channel, job_scraper.format_digest(jobs))
     except Exception as e:
         await channel.send(f"Job scrape failed: {e}")
