@@ -298,11 +298,10 @@ def model_blurb(picks: list[dict], size: int | None) -> str:
 
     return (
         f"A LightGBM {kind} model ({trees} trees) scores {universe} on {feats} "
-        f"— momentum, valuation, quality, size — and orders them by "
-        f"expected {horizon} return relative to the market, adjusted for "
-        f"volatility. Retrained from scratch every week on month-end data back "
-        f"to 2019. Chips below show what moved each score — the model's own "
-        f"reasoning, not a recommendation."
+        f"(momentum, valuation, quality, size) and orders them by expected "
+        f"{horizon} return relative to the market, adjusted for volatility. "
+        f"Trained on month-end data back to 2019. "
+        f"Chips show the factors that moved each score most."
     )
 
 
