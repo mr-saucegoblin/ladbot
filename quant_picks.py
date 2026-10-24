@@ -490,9 +490,18 @@ def model_detail() -> tuple[dict | None, str | None]:
                "stocks, and there were 122 of them in here skewing every "
                "sector-relative comparison."),
 
+        # The scale warning is not pedantry. lambdarank's loss only compares
+        # names inside a query group (one month), and it is invariant to the
+        # overall level of a group's scores, so nothing in training pins the two
+        # months to a shared scale. Rank 1 scored 0.428 on one Sep 30 run and
+        # 1.078 on Oct 23; a 0.60 is rank 1 of 410 in the first and rank 5 in
+        # the other. Pooling months cost us a real wrong answer once already:
+        # decile monotonicity read -0.22 across pooled scores and +0.78 cut per
+        # month, same predictions. Rank and decile are the comparable fields.
         _field("Reading the table",
                "Scores only mean anything within one month, so don't read this "
-               "week's against September's. The chips on each row are that "
+               "week's against September's. Compare ranks across weeks, not "
+               "scores. The chips on each row are that "
                "stock's own factor attributions, biggest first. Cyan helped its "
                "score, pink hurt it. That's what the model leaned on. It doesn't "
                "mean it was right."),
