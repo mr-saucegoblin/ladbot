@@ -223,6 +223,12 @@ def train(fit, val, feature_cols, target, quick: bool, verbose: bool = True,
         "lambda_l2":        5.0,
         "verbose":          -1,
         "seed":             42,
+        # OpenMP reads the HOST's core count, not the container's CPU quota. On
+        # Railway that means LightGBM sees the whole machine, spawns a thread per
+        # core, and they contend for a fraction of one vCPU - slower than running
+        # on two threads. Locally this costs nothing: the dataset is 32k x 16, far
+        # too small for more threads to help.
+        "num_threads":      2,
     }
 
     if rank:
@@ -243,7 +249,10 @@ def train(fit, val, feature_cols, target, quick: bool, verbose: bool = True,
         params["ndcg_eval_at"]  = [50]
         params["lambdarank_truncation_level"] = 100
 
-    rounds = 200 if quick else 3000
+    # 3000 was effectively unbounded: early stopping has fired at 170 and 231
+    # on real runs, so 800 leaves generous headroom while capping the worst
+    # case on a slow container at something that finishes.
+    rounds = 200 if quick else 800
 
     if verbose:
         print("\n" + "=" * 70)

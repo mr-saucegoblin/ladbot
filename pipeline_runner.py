@@ -51,7 +51,10 @@ STEPS = [
      "features for the new snapshot"),
     (["7_eda.py"], 900,
      "rebuild quant_clean.parquet"),
-    (["9_score.py", "--date", "{as_of}", "--save", "--top", "10"], 2700,
+    # 90 min, not 45: this trains a LightGBM model, and the container it trains
+    # on is far slower than a laptop. A backstop, not a target - if it ever needs
+    # the full window, the fix is fewer threads or fewer rounds, not more time.
+    (["9_score.py", "--date", "{as_of}", "--save", "--top", "10"], 5400,
      "score and publish picks"),
 ]
 
