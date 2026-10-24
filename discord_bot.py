@@ -188,7 +188,15 @@ def _text(response) -> str:
     AttributeError on every call. Thinking text is empty under the default
     display setting anyway, so there is nothing lost by skipping it.
     """
-    return "".join(b.text for b in response.content if b.type == "text")
+    out = "".join(b.text for b in response.content if b.type == "text")
+    if not out and response.stop_reason == "max_tokens":
+        # Thinking is billed against max_tokens, so too small a budget is spent
+        # reasoning and the turn ends before a single text block is emitted. The
+        # caller then gets "" and posts nothing, which looks like a dead feed or
+        # a swallowed exception rather than what it is. Say so in the log.
+        print(f"[claude] max_tokens hit with no text: thinking consumed the whole "
+              f"{response.usage.output_tokens}-token budget. Raise max_tokens.")
+    return out
 
 
 async def _scan_intro() -> str:
@@ -197,7 +205,7 @@ async def _scan_intro() -> str:
         return claude.messages.create(
             model=CLAUDE_MODEL,
             output_config={"effort": "low"},
-            max_tokens=120,
+            max_tokens=2000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": (
                 "Write one short message (1-2 sentences max) announcing you're about to scan last week's news "
@@ -448,7 +456,7 @@ async def _build_hockey_recap(stats, delta, old_snap) -> str:
         return claude.messages.create(
             model=CLAUDE_MODEL,
             output_config={"effort": "low"},
-            max_tokens=600,
+            max_tokens=4000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -877,7 +885,12 @@ async def _build_daily_news_summary() -> tuple[str, int] | None:
         f"for over the next day or two. Then one closing line in character.\n\n"
 
         f"Ignore your usual 3-4 sentence limit — this is the daily briefing and "
-        f"it is meant to be meaty. Aim for 220 to 320 words total - it has to fit a single Discord message, so stay inside that. Stay fully in "
+        f"it is meant to be meaty. HARD LIMIT: the whole reply must be under "
+        f"1,700 characters, roughly 260 words. It gets posted as one Discord "
+        f"message with a short intro line above it, and Discord's ceiling is "
+        f"2,000, so going over means it is split mid-list. If it will not fit, "
+        f"cut the weakest story rather than trimming every sentence into mush. "
+        f"Stay fully in "
         f"character: punchy and conversational, but sharp and specific. No "
         f"hashtags. No blank lines between the numbered items. Start directly "
         f"with '1.' and no intro sentence before it.\n\n"
@@ -894,7 +907,7 @@ async def _build_daily_news_summary() -> tuple[str, int] | None:
             # 600 capped the old one-line-per-story format almost exactly, so a
             # longer brief would have been truncated mid-sentence rather than
             # written short. 400 words is roughly 550 tokens; this leaves room.
-            max_tokens=1500,
+            max_tokens=8000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -1069,7 +1082,7 @@ async def on_message(message: discord.Message):
                 return claude.messages.create(
                     model=CLAUDE_MODEL,
                     output_config={"effort": "low"},
-                    max_tokens=1000,
+                    max_tokens=4000,
                     system=system,
                     messages=context or [{"role": "user", "content": f"[{username}]: {raw_text}"}],
                 )
@@ -1213,7 +1226,7 @@ async def sleep_cmd(ctx: commands.Context):
         return claude.messages.create(
             model=CLAUDE_MODEL,
             output_config={"effort": "low"},
-            max_tokens=100,
+            max_tokens=2000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": (
                 "Say goodnight — you're going to sleep for an hour and won't respond unless someone @mentions you directly. "
