@@ -28,6 +28,7 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from database import get_conn
+import news_scanner
 from news_scanner import fetch_headlines
 from theme_detector import detect_themes
 from company_mapper import map_theme_to_companies
@@ -934,6 +935,17 @@ async def daily_news():
     # 2000-char limit on a busy news day, and send() raises rather
     # than truncating.
     await _send_long(channel, f"{_news_intro(article_count)}\n\n{summary}")
+
+    # A dead feed is operations, not content: it goes to OPS_CHANNEL rather
+    # than into the lads' morning post. Reported at all because the failure
+    # is otherwise invisible - every fetch error is swallowed into an empty
+    # list so one bad feed cannot take the post down, which also means a
+    # feed that has been 404ing for months looks exactly like a quiet day.
+    if news_scanner.LAST_FAILURES:
+        ops = bot.get_channel(OPS_CHANNEL_ID)
+        if ops:
+            body = "\n".join(news_scanner.LAST_FAILURES[:10])
+            await ops.send(f"News feeds that failed today:\n```\n{body}\n```")
 
 
 # ── job scraper tasks ─────────────────────────────────────────────────────────

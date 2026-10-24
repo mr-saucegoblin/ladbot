@@ -29,7 +29,16 @@ BROAD_FEEDS = {
     "CBC Business":            "https://www.cbc.ca/cmlink/rss-business",
     "Globe and Mail Business": "https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/business/",
     # US & global macro
-    "Yahoo Finance US":        "https://finance.yahoo.com/rss/topfinstories",
+    #
+    # "Yahoo Finance US" lived here and had been returning a hard 404 for an
+    # unknown length of time. Nothing caught it: a failed feed prints a warning
+    # to stdout and returns [], so the only symptom was a slightly smaller
+    # headline count, which looks like a quiet news day. Its replacements were
+    # picked by probing for entries actually published in the last 24h, not just
+    # for an HTTP 200 - a feed can answer 200 with months-old items.
+    "MarketWatch":             "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+    "Investing.com":           "https://www.investing.com/rss/news.rss",
+    "CNBC Economy":            "https://www.cnbc.com/id/20910258/device/rss/rss.html",
     "Seeking Alpha":           "https://seekingalpha.com/feed.xml",
     "Economist Finance":       "https://www.economist.com/finance-and-economics/rss.xml",
     "FT Markets":              "https://www.ft.com/rss/home/uk",
@@ -55,6 +64,16 @@ NICHE_FEEDS = {
 }
 
 LOOKBACK_DAYS = 7
+
+# Sources that errored on the most recent fetch_headlines() call, so a caller
+# can report them somewhere a person will actually look.
+#
+# Every fetch failure here is caught and turned into an empty list, which is the
+# right call - one dead feed must not take down the morning post. The cost is
+# that a dead feed is indistinguishable from a quiet one: "Yahoo Finance US"
+# 404'd for an unknown period and the only trace was a smaller headline count
+# and a warning printed to a log nobody reads.
+LAST_FAILURES: list[str] = []
 
 
 def _is_recent(entry, cutoff: datetime) -> bool:
@@ -85,6 +104,7 @@ def _fetch_feed(source: str, url: str, seen: set, cutoff: datetime, cap: int | N
         return results
     except Exception as e:
         print(f"  Warning: {source} feed failed — {e}")
+        LAST_FAILURES.append(f"{source}: {e}")
         return []
 
 
@@ -93,6 +113,7 @@ def _fetch_fmp_general_news(seen: set, cutoff: datetime) -> list[str]:
     api_key = os.getenv("FMP_API_KEY")
     if not api_key:
         print("  Warning: FMP_API_KEY not set — skipping FMP general news")
+        LAST_FAILURES.append("FMP General News: FMP_API_KEY not set")
         return []
     try:
         response = requests.get(
@@ -120,6 +141,7 @@ def _fetch_fmp_general_news(seen: set, cutoff: datetime) -> list[str]:
         return results
     except Exception as e:
         print(f"  Warning: FMP general news failed — {e}")
+        LAST_FAILURES.append(f"FMP General News: {e}")
         return []
 
 
@@ -132,6 +154,7 @@ def fetch_headlines(lookback_hours: int = LOOKBACK_DAYS * 24) -> list[str]:
     Returns a deduplicated flat list of headline strings.
     lookback_hours controls how far back to look (default: 7 days for weekly scan).
     """
+    LAST_FAILURES.clear()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
     seen: set[str] = set()
     headlines: list[str] = []
