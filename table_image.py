@@ -161,8 +161,16 @@ def render(picks, snap, scope, out_path=None) -> str:
         # barely reads, and a line does the same job more definitely: it closes
         # the block rather than tinting it. Same colour and weight as the rule
         # under the header, so the page has one kind of divider.
+        # Geometry, so this does not drift again. With the identity line at y:
+        #   this pick's chips   y + 1.12, half-height 0.42  ->  y+0.70 .. y+1.54
+        #   previous chips      2.25 earlier                ->  y-1.55 .. y-0.71
+        #   this identity text  about y-0.30 at the top
+        # The only clear gap is y-0.71 .. y-0.30, so the rule goes at its middle.
+        # An earlier version used y-0.95, which is inside the previous chip row;
+        # drawn at zorder 0 it hid behind the pills and showed only in the gaps
+        # between them, which read as a line cutting through the chips.
         if i:
-            ax.plot([X_LEFT, X_RIGHT], [y - 0.95] * 2,
+            ax.plot([X_LEFT, X_RIGHT], [y - 0.50] * 2,
                     color=_GRID, linewidth=1.0, zorder=0)
 
         ax.text(X_LEFT + 2.2, y, str(p["rank"]), color=_GOLD, fontsize=12,
