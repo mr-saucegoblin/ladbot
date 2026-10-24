@@ -759,6 +759,126 @@ async def weekly_scan():
 
 
 async def _build_daily_news_summary() -> tuple[str, int] | None:
+    """
+    Fetch 24h headlines and ask Claude for a briefing. Returns (text, count).
+
+    The first version asked for one sentence per story, which produced a list of
+    restated headlines: "Brent tops $116 — oil is going up." True, already in the
+    headline, and worth nothing to someone who read it. The three things asked
+    for below are what makes it a briefing rather than a feed:
+
+        what happened  ->  why it matters  ->  what it sets up next
+
+    Only the second and third are new information. The prompt says so explicitly,
+    because a model given "summarize these" will reliably spend its tokens on the
+    first one.
+
+    The Canadian lens is deliberate too. These feeds are mostly US and global
+    macro, and a generic wire summary is something the lads can get anywhere. The
+    useful question for this server is what a story does to the TSX, which is
+    energy- and materials-heavy and behaves differently from the S&P on exactly
+    the days that matter.
+
+    Naming sectors and companies is allowed where it is the mechanism of a story;
+    recommending a trade is not. The earlier blanket ban on tickers also removed
+    the specificity that made an explanation worth reading.
+    """
+    def _blocking():
+        return fetch_headlines(lookback_hours=24)
+    headlines = await asyncio.to_thread(_blocking)
+    if not headlines:
+        return None
+    article_count = len(headlines)
+
+    headlines_block = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines))
+    prompt = (
+        f"Here are today's headlines from the past 24 hours.\n\n"
+        f"## Headlines\n{headlines_block}\n\n"
+        f"## Instructions\n"
+        f"Pick the 5 most significant stories for markets and investors today. "
+        f"Weight toward what actually moves the needle for a Canadian investor "
+        f"watching the TSX, which is heavy in energy, materials and financials "
+        f"and does not trade like the S&P.\n\n"
+
+        f"Format each item on a single line:\n"
+        f"[number]. [emoji] **[bold headline]** — [2 to 3 sentences]\n\n"
+
+        f"Those sentences must do three things, in order: say what happened, say "
+        f"why it matters, and say what it sets up next. The second and third are "
+        f"the whole point — anyone can read a headline, so tell them what it "
+        f"implies, who it hits, and what breaks or benefits downstream. Name the "
+        f"mechanism, the sector and the number. Connect stories to each other "
+        f"where they are connected. Never write filler like 'investors are "
+        f"watching closely' or 'markets reacted' — if a sentence would survive "
+        f"being pasted under a different headline, cut it.\n\n"
+
+        f"After the five, add:\n"
+        f"**👀 What I'm watching** followed by 2 or 3 short lines on what to look "
+        f"for over the next day or two. Then one closing line in character.\n\n"
+
+        f"Ignore your usual 3-4 sentence limit — this is the daily briefing and "
+        f"it is meant to be meaty. Aim for 250 to 400 words total. Stay fully in "
+        f"character: punchy and conversational, but sharp and specific. No "
+        f"hashtags. No blank lines between the numbered items. Start directly "
+        f"with '1.' and no intro sentence before it.\n\n"
+
+        f"You may name sectors and companies where that is the substance of a "
+        f"story. Do NOT tell anyone to buy or sell anything and do not frame any "
+        f"of it as a recommendation."
+    )
+
+    def _ask():
+        return claude.messages.create(
+            model=CLAUDE_MODEL,
+            # 600 capped the old one-line-per-story format almost exactly, so a
+            # longer brief would have been truncated mid-sentence rather than
+            # written short. 400 words is roughly 550 tokens; this leaves room.
+            max_tokens=1500,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+    response = await asyncio.to_thread(_ask)
+    return response.content[0].text.strip(), article_count
+
+
+def _news_intro(article_count: int) -> str:
+    """
+    The greeting above the briefing, shared by the 9am post and !testnews.
+
+    It was duplicated in both, which is how the two drift: the scheduled one is
+    the copy nobody watches, so it is exactly the copy that would have been left
+    behind on an edit.
+    """
+    closed = datetime.datetime.now(ET).weekday() >= 5
+    lead = "Markets are closed lads" if closed else "30 mins to market open lads"
+    return (f"\U0001f608 **{lead}** — scanned {article_count} articles, "
+            f"here's what went down in the last 24 hours:")
+
+
+@tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
+async def weekly_scan():
+    """Auto-post Friday picks at 9 AM ET."""
+    if datetime.datetime.now(ET).weekday() != 4:  # 4 = Friday
+        return
+    channel_id = int(os.getenv("SCAN_CHANNEL_ID", 0))
+    channel = bot.get_channel(channel_id)
+    if not channel:
+        print("SCAN_CHANNEL_ID not set or channel not found — skipping weekly scan")
+        return
+    recap = await asyncio.to_thread(_load_last_week_recap)
+    await channel.send(await _scan_intro())
+    posts, theme_picks, error = await _run_pipeline()
+    if error:
+        await channel.send(f"Weekly scan failed: {error}")
+        return
+    await asyncio.to_thread(_save_weekly_picks, theme_picks)
+    if recap:
+        await channel.send(recap)
+    await _send_posts_with_charts(channel, posts, theme_picks)
+
+
+async def _build_daily_news_summary() -> tuple[str, int] | None:
     """Fetch last 24h headlines and ask Claude to summarize the top 5. Returns (summary, article_count) or None on failure."""
     def _blocking():
         return fetch_headlines(lookback_hours=24)
@@ -805,12 +925,10 @@ async def daily_news():
         await channel.send("Couldn't pull headlines this morning — feeds might be down.")
         return
     summary, article_count = result
-    weekday = datetime.datetime.now(ET).weekday()
-    if weekday >= 5:  # Saturday or Sunday
-        intro = f"😈 **Markets are closed lads** — scanned {article_count} articles, here's what went down in the last 24 hours:"
-    else:
-        intro = f"😈 **30 mins to market open lads** — scanned {article_count} articles, here's what went down in the last 24 hours:"
-    await channel.send(f"{intro}\n\n{summary}")
+    # _send_long, not channel.send: the briefing runs past Discord's
+    # 2000-char message limit on a busy news day, and send() raises
+    # rather than truncating.
+    await _send_long(channel, f"{_news_intro(article_count)}\n\n{summary}")
 
 
 # ── job scraper tasks ─────────────────────────────────────────────────────────
@@ -1051,12 +1169,7 @@ async def testnews(ctx: commands.Context):
         await channel.send("Couldn't pull headlines — feeds might be down.")
         return
     summary, article_count = result
-    weekday = datetime.datetime.now(ET).weekday()
-    if weekday >= 5:
-        intro = f"😈 **Markets are closed lads** — scanned {article_count} articles, here's what went down in the last 24 hours:"
-    else:
-        intro = f"😈 **30 mins to market open lads** — scanned {article_count} articles, here's what went down in the last 24 hours:"
-    await channel.send(f"{intro}\n\n{summary}")
+    await _send_long(channel, f"{_news_intro(article_count)}\n\n{summary}")
 
 
 @bot.command(name="chart")
