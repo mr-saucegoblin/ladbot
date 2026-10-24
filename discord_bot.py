@@ -43,7 +43,7 @@ load_dotenv()
 
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 HOME_GUILD_ID = int(os.getenv("DISCORD_GUILD_ID"))
-CLAUDE_MODEL = "claude-sonnet-4-6"
+CLAUDE_MODEL = "claude-sonnet-5-5"
 MAX_HISTORY = 150  # messages to keep per channel before rolling off
 
 
@@ -176,11 +176,26 @@ claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+def _text(response) -> str:
+    """
+    Join a response's text blocks, skipping everything else.
+
+    `response.content[0].text` worked only because thinking was off. Sonnet 5.5
+    runs adaptive thinking by default and it cannot be turned off (sending
+    {"type": "disabled"} is a 400), so content[0] is normally a thinking block -
+    which carries .thinking, not .text - and the old access would raise
+    AttributeError on every call. Thinking text is empty under the default
+    display setting anyway, so there is nothing lost by skipping it.
+    """
+    return "".join(b.text for b in response.content if b.type == "text")
+
+
 async def _scan_intro() -> str:
     """Generate a one-off in-character message announcing the scan is starting."""
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
+            output_config={"effort": "low"},
             max_tokens=120,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": (
@@ -190,7 +205,7 @@ async def _scan_intro() -> str:
             )}],
         )
     response = await asyncio.to_thread(_ask)
-    return response.content[0].text
+    return _text(response)
 
 def _trim_history(channel_id: int) -> None:
     h = histories.get(channel_id, [])
@@ -388,13 +403,14 @@ async def _build_hockey_recap(stats, delta, old_snap) -> str:
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
+            output_config={"effort": "low"},
             max_tokens=600,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
 
     response = await asyncio.to_thread(_ask)
-    msg = response.content[0].text
+    msg = _text(response)
 
     # Always append a standings table
     table = "\n\n**📊 Standings:**\n" + "\n".join(
@@ -830,6 +846,7 @@ async def _build_daily_news_summary() -> tuple[str, int] | None:
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
+            output_config={"effort": "high"},
             # 600 capped the old one-line-per-story format almost exactly, so a
             # longer brief would have been truncated mid-sentence rather than
             # written short. 400 words is roughly 550 tokens; this leaves room.
@@ -839,7 +856,7 @@ async def _build_daily_news_summary() -> tuple[str, int] | None:
         )
 
     response = await asyncio.to_thread(_ask)
-    return response.content[0].text.strip(), article_count
+    return _text(response).strip(), article_count
 
 
 def _news_intro(article_count: int) -> str:
@@ -857,61 +874,6 @@ def _news_intro(article_count: int) -> str:
 
 
 @tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
-async def weekly_scan():
-    """Auto-post Friday picks at 9 AM ET."""
-    if datetime.datetime.now(ET).weekday() != 4:  # 4 = Friday
-        return
-    channel_id = int(os.getenv("SCAN_CHANNEL_ID", 0))
-    channel = bot.get_channel(channel_id)
-    if not channel:
-        print("SCAN_CHANNEL_ID not set or channel not found — skipping weekly scan")
-        return
-    recap = await asyncio.to_thread(_load_last_week_recap)
-    await channel.send(await _scan_intro())
-    posts, theme_picks, error = await _run_pipeline()
-    if error:
-        await channel.send(f"Weekly scan failed: {error}")
-        return
-    await asyncio.to_thread(_save_weekly_picks, theme_picks)
-    if recap:
-        await channel.send(recap)
-    await _send_posts_with_charts(channel, posts, theme_picks)
-
-
-async def _build_daily_news_summary() -> tuple[str, int] | None:
-    """Fetch last 24h headlines and ask Claude to summarize the top 5. Returns (summary, article_count) or None on failure."""
-    def _blocking():
-        return fetch_headlines(lookback_hours=24)
-    headlines = await asyncio.to_thread(_blocking)
-    if not headlines:
-        return None
-    article_count = len(headlines)
-
-    headlines_block = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines))
-    prompt = (
-        f"Here are today's headlines from the past 24 hours.\n\n"
-        f"## Headlines\n{headlines_block}\n\n"
-        f"## Instructions\n"
-        f"Pick the 5 most significant stories for markets and investors today. "
-        f"Write them as a compact numbered list — each item on a single line in this exact format: [number]. [emoji] **[bold headline]** — [one sentence explanation]. "
-        f"No blank lines between items. Start directly with '1.' — no intro sentence before the list. "
-        f"You may add a single closing line after the list if you want. Stay fully in character — punchy and conversational, but sharp and specific. No hashtags. "
-        f"This is purely a news recap — do NOT recommend stocks, mention tickers, or give investment opinions."
-    )
-
-    def _ask():
-        return claude.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=600,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-    response = await asyncio.to_thread(_ask)
-    return response.content[0].text.strip(), article_count
-
-
-@tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=ZoneInfo("America/Toronto")))
 async def daily_news():
     """Post a 24h news summary at 9:00 AM ET every day except Friday."""
     if datetime.datetime.now(ET).weekday() == 4:  # Friday has the weekly scan
@@ -926,8 +888,8 @@ async def daily_news():
         return
     summary, article_count = result
     # _send_long, not channel.send: the briefing runs past Discord's
-    # 2000-char message limit on a busy news day, and send() raises
-    # rather than truncating.
+    # 2000-char limit on a busy news day, and send() raises rather
+    # than truncating.
     await _send_long(channel, f"{_news_intro(article_count)}\n\n{summary}")
 
 
@@ -1051,13 +1013,14 @@ async def on_message(message: discord.Message):
                 system = SYSTEM_PROMPT + standings_ctx
                 return claude.messages.create(
                     model=CLAUDE_MODEL,
+                    output_config={"effort": "low"},
                     max_tokens=1000,
                     system=system,
                     messages=context or [{"role": "user", "content": f"[{username}]: {raw_text}"}],
                 )
             response = await asyncio.to_thread(_ask)
 
-        reply = response.content[0].text
+        reply = _text(response)
 
         if is_home:
             histories[channel_id].append({"role": "assistant", "content": reply})
@@ -1194,6 +1157,7 @@ async def sleep_cmd(ctx: commands.Context):
     def _ask():
         return claude.messages.create(
             model=CLAUDE_MODEL,
+            output_config={"effort": "low"},
             max_tokens=100,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": (
@@ -1203,7 +1167,7 @@ async def sleep_cmd(ctx: commands.Context):
             )}],
         )
     response = await asyncio.to_thread(_ask)
-    await ctx.send(response.content[0].text)
+    await ctx.send(_text(response))
 
 
 @bot.command(name="wake")
