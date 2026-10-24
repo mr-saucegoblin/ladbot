@@ -330,33 +330,56 @@ def turnover(snap, n: int = 10) -> dict | None:
         return None
 
 
+def _names(tickers: list[str], cap: int = 5) -> str:
+    """
+    A ticker list for prose, bounded so a heavy-turnover week cannot run long.
+
+    Five is well above what this model does in a week - Oct 16 to Oct 23 changed
+    nothing at all - but a quarterly fundamentals refresh can land several names
+    at once, and an unbounded list would push the line past the table width.
+    """
+    shown = [t.removesuffix(".TO") for t in tickers[:cap]]
+    extra = len(tickers) - len(shown)
+    return ", ".join(shown) + (f" and {extra} more" if extra else "")
+
+
 def turnover_note(snap, n: int = 10) -> str:
     """
-    The one line in the picks post that is allowed to differ week to week.
+    The one line above the table that is allowed to differ week to week.
 
-    Everything else above the table — model type, universe size, horizon — is the
-    same every Friday, which is why it has been cut to a single line and the rest
-    moved to !model. A paragraph nobody's eye stops on is worse than no paragraph.
+    Everything else there (model type, universe size, horizon) is identical
+    every Friday, which is why it was cut to a single line and the rest moved to
+    !model. A paragraph nobody's eye stops on is worse than no paragraph.
+
+    Names that ENTERED the list are already visible in the table underneath it.
+    Names that DROPPED OUT appear nowhere else in the post, so this line is the
+    only place they are reported, and the dropped list is never the one trimmed
+    first. _names() caps each side at five independently for that reason.
+
+    Register matches !model: declarative, no contractions, no em dash. "Added"
+    and "Dropped" rather than "in" and "out", which read as a trade blotter.
     """
     t = turnover(snap, n)
     if not t:
         return ""
 
-    # "Oct 16", not "Oct 16" zero-padded: %d gives "Oct 06" for single digits.
+    # "Oct 6", not "Oct 06": %d zero-pads single digits.
     when = f"{t['prev']:%b} {t['prev'].day}"
-    short = lambda ts: ", ".join(x.removesuffix(".TO") for x in ts)
 
     if not t["entered"] and not t["exited"]:
-        return (f"Same {n} names as {when}, reordered." if t["reordered"]
-                else f"Unchanged since {when}.")
+        return (f"Constituents unchanged since {when}, ranks reordered."
+                if t["reordered"] else f"Unchanged since {when}.")
 
+    # max(), not len(entered): with a fixed n the two are equal, but if the
+    # universe ever shrinks below n they diverge and the larger is the honest
+    # count of what moved.
     k = max(len(t["entered"]), len(t["exited"]))
-    parts = [f"{k} change{'' if k == 1 else 's'} since {when}"]
+    out = [f"{k} change{'' if k == 1 else 's'} since {when}."]
     if t["entered"]:
-        parts.append(f"in {short(t['entered'])}")
+        out.append(f"Added {_names(t['entered'])}.")
     if t["exited"]:
-        parts.append(f"out {short(t['exited'])}")
-    return " — ".join([parts[0], "  ·  ".join(parts[1:])])
+        out.append(f"Dropped {_names(t['exited'])}.")
+    return " ".join(out)
 
 
 def model_blurb(picks: list[dict], size: int | None, snap=None) -> str:
