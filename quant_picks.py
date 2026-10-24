@@ -272,11 +272,14 @@ def model_blurb(picks: list[dict], size: int | None) -> str:
     objective, the horizon and the tree count; the stored drivers carry the
     feature count, now that 9_score.py keeps all of them instead of the top five.
 
-    The edge is quoted as a RANGE and never as a t-stat. The measured decile
-    spread is +3.46% at t = 2.28 on non-overlapping windows, but dropping the
-    three best months takes that to 1.72, and the feature selection used
-    test-window data. "Roughly 2-3.5% per quarter" is honest under every version
-    of that; a t-stat in a Discord post is false precision about 40 months.
+    NO PERFORMANCE NUMBER. It says what the model does, never what it returns.
+
+    An earlier version quoted "roughly 2-3.5% per quarter" from the backtest.
+    Deliberately removed: in a chat post a historical range is read as a
+    forecast, and that one rests on 40 overlapping months - about 13 independent
+    periods - with feature selection that used test-window data. Describing the
+    method is defensible; publishing an expected return is not, and this is the
+    wrong surface to carry the caveats that would make it so.
     """
     tag = (picks[0].get("model_tag") or "") if picks else ""
     kind = "ranking" if tag.startswith("lambdarank") else "classification"
@@ -298,8 +301,8 @@ def model_blurb(picks: list[dict], size: int | None) -> str:
         f"— momentum, valuation, quality, size — and orders them by "
         f"expected {horizon} return relative to the market, adjusted for "
         f"volatility. Retrained from scratch every week on month-end data back "
-        f"to 2019. Out of sample the top decile has beaten the bottom by roughly "
-        f"2–3.5% per quarter. Chips below show what moved each score."
+        f"to 2019. Chips below show what moved each score — the model's own "
+        f"reasoning, not a recommendation."
     )
 
 
