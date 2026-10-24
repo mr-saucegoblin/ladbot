@@ -48,7 +48,11 @@ SANS = "DejaVu Sans"
 # instead of one trades height, which scrolls, for width, which does not.
 FIG_W_INCHES = 7.0
 LINE_H_INCHES = 0.30
-LINES_PER_PICK = 2.25
+# 2.8, not 2.25. Discord scales an image to the message WIDTH, so extra height
+# costs scrolling and nothing else - the type does not shrink. At 2.25 each pick
+# block was 2.5px clear of the rule above and below it, which reads as cramped
+# rather than as a divider. 2.8 gives roughly 6px either side.
+LINES_PER_PICK = 2.8
 
 # Characters that fit on the meta line between the ticker and the score, at
 # 8pt sans in a 1050px-wide render. Measured, not guessed.
@@ -162,15 +166,16 @@ def render(picks, snap, scope, out_path=None) -> str:
         # the block rather than tinting it. Same colour and weight as the rule
         # under the header, so the page has one kind of divider.
         # Geometry, so this does not drift again. With the identity line at y:
-        #   this pick's chips   y + 1.12, half-height 0.42  ->  y+0.70 .. y+1.54
-        #   previous chips      2.25 earlier                ->  y-1.55 .. y-0.71
+        #   this pick's chips   y + 1.15, half-height 0.42  ->  y+0.73 .. y+1.57
+        #   previous chips      LINES_PER_PICK earlier      ->  y-1.23 .. y-1.07
         #   this identity text  about y-0.30 at the top
-        # The only clear gap is y-0.71 .. y-0.30, so the rule goes at its middle.
-        # An earlier version used y-0.95, which is inside the previous chip row;
-        # drawn at zorder 0 it hid behind the pills and showed only in the gaps
-        # between them, which read as a line cutting through the chips.
+        # The clear gap is y-1.07 .. y-0.30, and the rule sits at its middle.
+        # An earlier version put it at y-0.95 with LINES_PER_PICK at 2.25, which
+        # was inside the previous chip row; drawn at zorder 0 it hid behind the
+        # pills and showed only in the gaps between them, reading as a line
+        # cutting through the chips rather than separating the blocks.
         if i:
-            ax.plot([X_LEFT, X_RIGHT], [y - 0.50] * 2,
+            ax.plot([X_LEFT, X_RIGHT], [y - 0.70] * 2,
                     color=_GRID, linewidth=1.0, zorder=0)
 
         ax.text(X_LEFT + 2.2, y, str(p["rank"]), color=_GOLD, fontsize=12,
@@ -207,7 +212,7 @@ def render(picks, snap, scope, out_path=None) -> str:
                 va="center", ha="right", alpha=0.95)
 
         for slot, c in enumerate(qp.driver_chips(p, N_CHIPS)):
-            _chip(ax, slot, y + 1.12, c["label"], c["score"], c["helped"])
+            _chip(ax, slot, y + 1.15, c["label"], c["score"], c["helped"])
 
     # ── footer ─────────────────────────────────────────────────────────────────
     ax.text(X_LEFT, units - 1.55,
