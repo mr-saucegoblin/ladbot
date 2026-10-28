@@ -565,6 +565,27 @@ PICKS_COUNT = 10
 MAX_PICKS_AGE_DAYS = 14
 
 
+async def _record_published(payload) -> None:
+    """
+    Note which names this post actually published, for the since-first-posted
+    return.
+
+    Called AFTER a successful send, on both the image and the text path. A post
+    that failed must not become a recommendation the returns are measured from,
+    and a run whose Sunday post never went out should leave no trace here.
+
+    Idempotent: a ticker already recorded keeps its original date, which is what
+    makes a name that stays in the top ten hold its first entry price instead of
+    re-basing every week.
+    """
+    picks, snap = payload.get("picks"), payload.get("snap")
+    if not picks or snap is None:
+        return
+    added = await asyncio.to_thread(quant_picks.record_published, picks, snap)
+    if added:
+        print(f"[picks] recorded {added} newly published name(s) for {snap}")
+
+
 async def _send_picks_table(channel, count: int = 10) -> str | None:
     """
     Render the picks table into `channel`. Returns an error string, or None.
@@ -597,6 +618,7 @@ async def _send_picks_table(channel, count: int = 10) -> str | None:
                                    file=discord.File(img, filename="picks.png"))
             finally:
                 os.remove(img)
+            await _record_published(payload)
             return None
     except Exception as e:
         print(f"[picks] table image failed, falling back to text: {e}")
@@ -608,6 +630,7 @@ async def _send_picks_table(channel, count: int = 10) -> str | None:
                           colour=payload["color"])
     embed.set_footer(text=payload["footer"])
     await channel.send(embed=embed)
+    await _record_published(payload)
     return None
 
 

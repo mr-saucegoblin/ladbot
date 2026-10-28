@@ -178,6 +178,158 @@ def universe_size(snap) -> int | None:
         return None
 
 
+
+# ── published-pick history ────────────────────────────────────────────────────
+#
+# What this answers: "how has each name done since LadBot first called it?"
+#
+# The rule is first-publication, not latest: a name that stays in the top ten
+# for six weeks keeps the entry it got on week one. Re-basing every week would
+# make a holder's number reset while they still held it, and would quietly hide
+# a loser by measuring it from a fresh, lower price each time.
+#
+# Why a table rather than deriving it from `predictions`:
+#
+#   1. Deriving means `rank <= PICKS_COUNT`, so raising PICKS_COUNT to 15 would
+#      retroactively claim the bot had recommended five more names all along.
+#   2. A snapshot can exist without ever having been posted - a pipeline run
+#      whose Sunday post failed. Predictions record what the model said; this
+#      records what was actually published, which is what a return should be
+#      measured against.
+#
+# The entry PRICE is deliberately not stored. It cannot be: picks post on Sunday
+# from Friday's snapshot, and Monday's open does not exist yet. It is resolved
+# on read from price_history, which is insert-only (ON CONFLICT DO NOTHING), so
+# a resolved entry never moves afterwards.
+
+PICK_HISTORY_DDL = """
+    CREATE TABLE IF NOT EXISTS pick_history (
+        ticker       TEXT PRIMARY KEY,
+        first_posted DATE NOT NULL,
+        first_rank   INTEGER,
+        created_at   TIMESTAMPTZ DEFAULT NOW()
+    )
+"""
+
+
+def record_published(picks: list[dict], snap) -> int:
+    """
+    Note that these names were published on `snap`. Returns how many were new.
+
+    PRIMARY KEY on ticker plus ON CONFLICT DO NOTHING *is* the "a repeat keeps
+    its original date" rule - there is no branch to get wrong.
+
+    `snap` is the snapshot date, not today. A Sunday post of Friday's list
+    records Friday, so the entry price lands on the following Monday's open,
+    which is the first price anyone reading the post could have traded at.
+
+    Never raises. Failing to record history must not stop the post going out.
+    """
+    if not picks or snap is None:
+        return 0
+    try:
+        conn = _conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(PICK_HISTORY_DDL)
+                cur.execute("SELECT COUNT(*) AS n FROM pick_history")
+                before = cur.fetchone()["n"]
+                cur.executemany(
+                    "INSERT INTO pick_history (ticker, first_posted, first_rank) "
+                    "VALUES (%s, %s, %s) ON CONFLICT (ticker) DO NOTHING",
+                    [(p["ticker"], snap, p.get("rank")) for p in picks])
+                cur.execute("SELECT COUNT(*) AS n FROM pick_history")
+                after = cur.fetchone()["n"]
+            conn.commit()
+            return after - before
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[picks] could not record pick history: {e}")
+        return 0
+
+
+def attach_returns(picks: list[dict], snap) -> list[dict]:
+    """
+    Add first_posted / entry_date / entry_price / last_price / ret to each pick.
+
+    `ret` is a price return, not a total return. The prices come from FMP's EOD
+    endpoint, which is split-adjusted but pays no attention to dividends
+    (2_fmp_pipeline.py stores adj_close as NULL because the stable API does not
+    return it). On a TSX top ten that understates the truth by whatever was paid
+    out, which is the honest direction to be wrong in.
+
+    `ret` is None when the entry price does not exist yet. That is the normal
+    state of a name published on Sunday from Friday's snapshot: Monday's open
+    has not happened. The caller shows "new" rather than a zero.
+    """
+    if not picks or snap is None:
+        return picks
+    try:
+        conn = _conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT to_regclass('public.pick_history') AS t")
+                if cur.fetchone()["t"] is None:
+                    return picks
+                cur.execute("""
+                    SELECT h.ticker, h.first_posted,
+                           e.entry_date,
+                           (SELECT open FROM price_history
+                             WHERE ticker = h.ticker AND date = e.entry_date) AS entry_price,
+                           (SELECT close FROM price_history
+                             WHERE ticker = h.ticker AND date <= %s
+                             ORDER BY date DESC LIMIT 1) AS last_price
+                    FROM pick_history h
+                    CROSS JOIN LATERAL (
+                        -- First trading day STRICTLY after publication. Strictly,
+                        -- because Friday's close was already in the model's
+                        -- features; Monday's open is the first price a reader
+                        -- could actually have paid.
+                        SELECT date AS entry_date FROM price_history
+                         WHERE ticker = h.ticker AND date > h.first_posted
+                         ORDER BY date LIMIT 1
+                    ) e
+                    WHERE h.ticker = ANY(%s)
+                """, (snap, [p["ticker"] for p in picks]))
+                by_ticker = {r["ticker"]: r for r in cur.fetchall()}
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[picks] could not compute returns: {e}")
+        return picks
+
+    for p in picks:
+        r = by_ticker.get(p["ticker"])
+        if not r:
+            p["ret"] = None
+            continue
+        p["first_posted"] = r["first_posted"]
+        p["entry_date"] = r["entry_date"]
+        p["entry_price"] = r["entry_price"]
+        p["last_price"] = r["last_price"]
+        if r["entry_price"] and r["last_price"] and float(r["entry_price"]) > 0:
+            p["ret"] = float(r["last_price"]) / float(r["entry_price"]) - 1
+        else:
+            p["ret"] = None
+    return picks
+
+
+def returns_summary(picks: list[dict]) -> str:
+    """
+    One line for the footer: how the published list has done, equal weighted.
+
+    Equal weighted because that is what the list is - ten names, no sizing. A
+    cap-weighted number would describe a portfolio nobody was told to hold.
+    """
+    rets = [p["ret"] for p in picks if p.get("ret") is not None]
+    if not rets:
+        return ""
+    avg = sum(rets) / len(rets)
+    up = sum(1 for r in rets if r > 0)
+    return f"avg {avg * 100:+.1f}% since first published  ({up}/{len(rets)} up)"
+
+
 # Discord renders a fenced block tagged `ansi` with real SGR colour, which is the
 # only way to get the chart palette into a chat message.
 #
@@ -207,6 +359,19 @@ ANSI = {
 # these same constants by _row(), so the header cannot drift away from the data the
 # way it did when the two were formatted independently.
 W_RANK, W_TICK, W_SEC, W_LABEL, W_SCORE = 2, 7, 5, 10, 3
+W_RET = 7      # "+12.4%" plus a space, or "new"
+
+
+def _ret_cell(pick: dict) -> str:
+    """The since-first-published return, padded to its column.
+
+    "new" rather than "0.0%" when no entry price exists yet: a name
+    published on Sunday off Friday's snapshot has no Monday open to enter
+    at, and a zero would claim a flat week that has not happened.
+    """
+    r = pick.get("ret")
+    text = "new" if r is None else f"{r * 100:+.1f}%"
+    return f"{text:>{W_RET}}"
 
 
 def _c(key: str, text: str) -> str:
@@ -571,16 +736,22 @@ def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
         return None, ("No scored picks yet - run `9_score.py --save` "
                       "to publish a snapshot.")
 
+    picks = attach_returns(picks, snap)
+
     head = _row(f"{'#':>{W_RANK}}", f"{'TICKER':<{W_TICK}}", f"{'SEC':<{W_SEC}}",
                 [(f"{'WHAT HELPED':<{W_LABEL}}", " " * W_SCORE),
-                 (f"{'':<{W_LABEL}}", " " * W_SCORE)], colour=False)
+                 (f"{'SINCE':>{W_RET}}", "")], colour=False)
     rows = [_c("header", head.rstrip())]
     for p in picks:
         tick = (p["ticker"] or "").removesuffix(".TO")[:W_TICK]
         raw = p.get("sector") or ""
         sec = SECTOR_CODE.get(raw, raw[:4])
+        # One driver cell, not two: the return is now one of the essentials and
+        # keeping both drivers alongside it pushes the line past ~50 columns,
+        # which scrolls sideways on a phone. The image carries four drivers.
         rows.append(_row(f"{p['rank']:>{W_RANK}}", f"{tick:<{W_TICK}}",
-                         f"{sec:<{W_SEC}}", _driver_cells(p, 2), colour=True))
+                         f"{sec:<{W_SEC}}",
+                         _driver_cells(p, 1) + [(_ret_cell(p), "")], colour=True))
 
     size = universe_size(snap)
     scope = f"ranked {size} TSX names" if size else "TSX main board"
@@ -588,9 +759,14 @@ def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
         "title": f"LadBot \u2014 Top {len(picks)} Holdings",
         "blurb": model_blurb(picks, size, snap),
         "body": "```ansi\n" + "\n".join(rows) + "\n```",
-        "footer": (f"{snap}  \u00b7  {scope}  \u00b7  score = how strongly it "
-                   f"shows that trait (0-100 vs sector)"),
+        "footer": (f"{snap}  \u00b7  {scope}  \u00b7  "
+                   + (returns_summary(picks) or
+                      "SINCE = return from the open after first published")),
         "color": 0xFF2D78,
+        # Handed back so the caller can record what it actually posted
+        # without running the query a second time.
+        "picks": picks,
+        "snap": snap,
     }, None
 
 

@@ -620,6 +620,42 @@ reader.
 `!picks` takes no argument. `PICKS_COUNT` is the single knob, read by both the command and
 the Sunday post.
 
+**`pick_history` — returns since a name was first published.** Each row of the picks
+table carries a `SINCE` percentage: the price return from the **open on the first trading
+day after the name first appeared in a published top ten**, to the latest close. A name
+that stays in the list keeps its original entry; re-basing weekly would reset a holder's
+number while they still held, and would quietly hide a loser by re-entering it at a lower
+price every Friday.
+
+The table records *publications*, not predictions, and that distinction is the reason it
+exists rather than a `rank <= 10` query over `predictions`:
+
+- deriving would mean `rank <= PICKS_COUNT`, so raising that constant to 15 would
+  retroactively claim the bot had been recommending five more names all along;
+- a snapshot can exist that was never posted — a run whose Sunday post failed. The model
+  said it; nobody was told. A return measured from it would be fiction.
+
+`quant_picks.record_published()` runs **after** a successful send, on both the image and
+the text path. `PRIMARY KEY (ticker)` plus `ON CONFLICT DO NOTHING` *is* the keeps-its-
+first-date rule, so there is no branch to get wrong.
+
+The entry **price** is deliberately not stored, because it cannot be: picks post on Sunday
+from Friday's snapshot and Monday's open does not exist yet. It resolves on read against
+`price_history`, which is insert-only, so a resolved entry never moves afterwards. Until
+that open exists the cell reads `new`, never `0.0%` — a zero would claim a flat week that
+has not happened, and the equal-weight average excludes unpriced names (`3/9 up`, not
+`3/10`).
+
+It is a **price** return, not total return: `adj_close` is NULL for all 1.53M rows because
+FMP's stable EOD endpoint does not return it. The OHLC is split-adjusted, so splits are
+handled and dividends are not, which understates the truth by whatever was paid out — the
+honest direction to be wrong in.
+
+`quant/12_pick_history.py` seeds the table from what was already published. `SERIES_START`
+is `2026-10-16`, the first Friday snapshot the bot actually posted; `2026-09-30` was a
+Wednesday development run on the pre-purge 410-name universe under a different model, and
+counting it would date TOT, PBL and TWM from a list nobody ever saw.
+
 **The text above the table is split by how often it changes.** The first version was a
 five-sentence paragraph describing the model, printed every week — identical every week,
 and therefore read about once. Worse than useless: it trains the eye to skip the space

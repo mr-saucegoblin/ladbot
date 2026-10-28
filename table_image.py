@@ -56,7 +56,14 @@ LINES_PER_PICK = 2.8
 
 # Characters that fit on the meta line between the ticker and the score, at
 # 8pt sans in a 1050px-wide render. Measured, not guessed.
-META_BUDGET = 72
+#
+# 72 before the return column was added. The return is right-aligned at a fixed
+# x, so the meta line has to stop short of it or a long company name runs
+# underneath "+12.4%".
+META_BUDGET = 58
+
+# Where the since-published return sits, right-aligned, left of the score.
+X_RET = 86.0
 
 X_LEFT, X_RIGHT = 3.0, 97.0
 X_TICK = 9.0
@@ -131,10 +138,11 @@ def _chip(ax, slot, y, label, score, helped):
 
 def render(picks, snap, scope, out_path=None) -> str:
     n = len(picks)
-    # 2.6 of title, the picks, then 2.3 of footer. The footer needs more room
-    # than its two lines suggest: text is centred on its y, so the last line's
-    # descenders fall below it and clip against the figure edge.
-    units = 2.6 + n * LINES_PER_PICK + 2.3
+    # 2.6 of title, the picks, then 2.9 of footer. The footer needs more room
+    # than its line count suggests: text is centred on its y, so the last line's
+    # descenders fall below it and clip against the figure edge. 2.3 covered two
+    # lines; the return explainer makes three.
+    units = 2.6 + n * LINES_PER_PICK + 2.9
     fig = plt.figure(figsize=(FIG_W_INCHES, units * LINE_H_INCHES), dpi=150)
     fig.patch.set_facecolor(_BG)
 
@@ -211,10 +219,37 @@ def render(picks, snap, scope, out_path=None) -> str:
                 fontsize=13, fontfamily=MONO, fontweight="bold",
                 va="center", ha="right", alpha=0.95)
 
+        # Return since the name was FIRST published, not since this snapshot.
+        # Cyan up, pink down - the same two colours the chips use, so the row
+        # reads with one vocabulary.
+        #
+        # "new" rather than "0.0%" when there is no entry price yet. A name
+        # published on Sunday from Friday's snapshot has no Monday open until
+        # Monday, and printing a zero would claim a flat week that never ran.
+        ret = p.get("ret")
+        if ret is None:
+            ax.text(X_RET, y, "new", color=_TEXT, fontsize=10, fontfamily=MONO,
+                    va="center", ha="right", alpha=0.45)
+        else:
+            ax.text(X_RET, y, f"{ret * 100:+.1f}%",
+                    color=_CYAN if ret >= 0 else _PINK, fontsize=11,
+                    fontfamily=MONO, fontweight="bold", va="center", ha="right",
+                    alpha=0.95)
+
         for slot, c in enumerate(qp.driver_chips(p, N_CHIPS)):
             _chip(ax, slot, y + 1.15, c["label"], c["score"], c["helped"])
 
     # ── footer ─────────────────────────────────────────────────────────────────
+    #
+    # Three left-aligned lines, one right-aligned total. The return explainer
+    # first went on the same y as the chip-score line, right-aligned against its
+    # left: at this width the two ran straight through each other. Anything
+    # sharing a y with another string has to be short enough that it cannot
+    # reach it, and the only one that qualifies is the summary.
+    ax.text(X_LEFT, units - 2.15,
+            "% = price return from the open after it was first published",
+            color=_TEXT, fontsize=7.5, fontfamily=MONO, va="center", ha="left",
+            alpha=0.45)
     ax.text(X_LEFT, units - 1.55,
             "chip score = how strongly it shows that trait, 0-100 vs sector",
             color=_TEXT, fontsize=7.5, fontfamily=MONO, va="center", ha="left",
@@ -223,6 +258,11 @@ def render(picks, snap, scope, out_path=None) -> str:
             "cyan helped the score  ·  pink hurt it",
             color=_TEXT, fontsize=7.5, fontfamily=MONO, va="center", ha="left",
             alpha=0.45)
+
+    summary = qp.returns_summary(picks)
+    if summary:
+        ax.text(X_RIGHT, units - 0.95, summary, color=_TEXT, fontsize=7.5,
+                fontfamily=MONO, va="center", ha="right", alpha=0.6)
 
     path = out_path or tempfile.NamedTemporaryFile(
         suffix="_ladbot_picks.png", delete=False).name
@@ -237,6 +277,7 @@ def render_latest(n: int = 10, out_path=None):
     if not picks:
         return None, ("No scored picks yet — run `9_score.py --save` "
                       "to publish a snapshot.")
+    picks = qp.attach_returns(picks, snap)
     size = qp.universe_size(snap)
     scope = f"ranked {size} TSX names" if size else "TSX main board"
     return render(picks, snap, scope, out_path), None
