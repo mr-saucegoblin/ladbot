@@ -187,6 +187,7 @@ Not yet wired: Discord alerts, Twitter/X posting, hosting of the model itself.
 | `9_score.py` | Score a live snapshot → `predictions` table | ~2 min |
 | `10_factor_baseline.py` | IC and decile spreads per feature, no model | ~2 min |
 | `11_selection_stability.py` | Was the feature cut honest? train-only vs full-sample | ~3 min |
+| `12_pick_history.py` | Seeds `published_picks` from posts that predate the recording code. One-off; `--dry-run` / `--show` | instant |
 
 **There is no `4_`.** It was a Google Trends pipeline, fully removed (look-ahead bias from
 Google's window-relative normalisation; flat-zero data for micro-caps).
@@ -571,8 +572,22 @@ universe floor. Queued for the next rebuild.
    and still get read. `financial_scores` accumulated 5,666 of them, some dated 2001.
 8. **Unpinned major versions.** pandas 3.0's `.dt.date` change arrived silently. `pandas` is
    now pinned.
-9. **Verify against actual values, not row counts or "no error."** Nearly every bug above hid
-   behind a successful-looking run.
+9. **Thinking is billed against `max_tokens`.** Sonnet 5.5 has adaptive thinking always on
+   and refuses to disable it, so a budget sized for a non-thinking model is spent reasoning
+   and the turn ends before a single text block exists. The call returns HTTP 200 with
+   `stop_reason: max_tokens` and `content: [thinking]`, `response.content[0].text` raises
+   `AttributeError`, and a caller that joins text blocks gets `""`. The news post went out
+   as a bare intro and looked like a dead feed. Every `max_tokens` in `discord_bot.py` was
+   raised and `_text()` logs when it returns empty on `max_tokens`.
+10. **Two strings on one line in a matplotlib figure.** Collided twice in `table_image.py`:
+   right-aligned text next to left-aligned is a collision waiting for either end to grow,
+   and the second time it was *me* lengthening the summary that broke it. One string per
+   `y`.
+11. **Verify against actual values, not row counts or "no error."** Nearly every bug above
+   hid behind a successful-looking run. This session added three more: a function spliced
+   in twice (Python bound the later copy, so the new code was dead and nothing errored),
+   a `_send_long` that raised on a paragraph it could not split, and a roll rule that sat
+   in cash for four days. All three parsed cleanly. **Parsing is not running.**
 
 ---
 
@@ -603,6 +618,20 @@ certain and a `SystemExit` in step three cannot take the bot down. It **stops at
 failure** — running `9_score.py` after `6_feature_compute.py` failed would publish a ranking
 built on last week's features while dating it today.
 
+**LadBot's own model is `claude-sonnet-5-5`** (`CLAUDE_MODEL` in `discord_bot.py`), shared
+by chat replies, the news briefing, the hockey recap, the scan intro and `!sleep`. Moved
+there from `claude-sonnet-4-6`, which is both older and dearer ($3/$15 per MTok against
+$2/$10).
+
+That was not a one-line change, and the trap is worth knowing before touching the model
+again: **Sonnet 5.5 runs adaptive thinking that cannot be disabled, and thinking is billed
+against `max_tokens`.** Every budget in the bot had been sized for a model that did not
+think, so the first run spent all 1,500 tokens reasoning and returned a response whose only
+content block was `thinking` — `stop_reason: max_tokens`, no text, HTTP 200. `!sleep` at
+100 tokens and the scan intro at 120 could never have returned anything at all. All five
+budgets were raised, `_text()` joins text blocks instead of indexing `content[0]`, and
+`output_config.effort` is set per call site (`high` for the briefing, `low` for chat).
+
 Progress appears as one self-editing Discord message in `OPS_CHANNEL_ID`, marking each step
 pending / running / done with its duration.
 
@@ -620,31 +649,63 @@ reader.
 `!picks` takes no argument. `PICKS_COUNT` is the single knob, read by both the command and
 the Sunday post.
 
-**`pick_history` — returns since a name was first published.** Each row of the picks
-table carries a `SINCE` percentage: the price return from the **open on the first trading
-day after the name first appeared in a published top ten**, to the latest close. A name
-that stays in the list keeps its original entry; re-basing weekly would reset a holder's
-number while they still held, and would quietly hide a loser by re-entering it at a lower
-price every Friday.
+**`published_picks` — the strategy return.** The footer carries one number for the whole
+list, and each row a `SINCE` percentage. Both come from the same definition, stated once
+at the top of the section in `quant_picks.py`:
 
-The table records *publications*, not predictions, and that distinction is the reason it
-exists rather than a `rank <= 10` query over `predictions`:
+> Every publication is a **3-month call**. A name not already held is bought at the open
+> on the first trading day after it is published, held three calendar months, and sold at
+> the open on the first trading day at or after maturity. If it is still being published
+> when the position matures, a fresh 3-month position opens. Equal weight per position.
+> No costs, no dividends.
+
+**Why three months and not "hold while it is in the top ten".** The model is
+`lambdarank_forward_return_3m`, and the walk-forward behind +3.46% at t=2.28 ranked the
+universe at a month end, bought the top decile and held three months. It never sold early.
+A weekly-rebalanced version of this list is a *different strategy that has never been
+measured*, so publishing its return would be quoting a number with nothing behind it.
+
+**A name leaving the top ten is therefore not a sell.** The call was "outperforms over
+three months", so the position runs to maturity whatever next week's ranking says. That is
+the uncomfortable half of matching the horizon, and it is also the half that keeps the
+number honest: the previous version averaged only the ten names currently on screen, so a
+name the model dropped vanished from the record — survivorship bias, which is the specific
+way a published track record lies.
+
+**Membership is recorded per week**, one row per `(snapshot_date, ticker)`, not one row per
+ticker. The first design (`pick_history`, first appearance only) could not say what the
+list held in a given week or when a name left, which is exactly what a strategy return
+needs. `pick_history` is superseded, read by nothing, and still present in the database.
+
+It records *publications*, not predictions, and that is why it is a table rather than a
+`rank <= 10` query over `predictions`:
 
 - deriving would mean `rank <= PICKS_COUNT`, so raising that constant to 15 would
   retroactively claim the bot had been recommending five more names all along;
 - a snapshot can exist that was never posted — a run whose Sunday post failed. The model
   said it; nobody was told. A return measured from it would be fiction.
 
-`quant_picks.record_published()` runs **after** a successful send, on both the image and
-the text path. `PRIMARY KEY (ticker)` plus `ON CONFLICT DO NOTHING` *is* the keeps-its-
-first-date rule, so there is no branch to get wrong.
+`record_published()` runs **after** a successful send, on both the image and the text path.
 
-The entry **price** is deliberately not stored, because it cannot be: picks post on Sunday
-from Friday's snapshot and Monday's open does not exist yet. It resolves on read against
-`price_history`, which is insert-only, so a resolved entry never moves afterwards. Until
-that open exists the cell reads `new`, never `0.0%` — a zero would claim a flat week that
-has not happened, and the equal-weight average excludes unpriced names (`3/9 up`, not
-`3/10`).
+**Two defects the tests caught before this shipped**, both of which would have quietly
+corrupted the published number:
+
+- The roll waited for the next publication *after* maturity, which sat in cash for four
+  days at every roll — a drag the backtest never had. It now rolls at maturity off the list
+  standing at the time, selling and rebuying at the same open.
+- With no freshness bound, a months-old list counted as standing, so a name that stopped
+  being published rolled forever. A roll now needs a list within `ROLL_STALENESS_DAYS`
+  (21) of maturity; at weekly publication a wider gap is a broken pipeline, and rolling on
+  it would invent a recommendation the model never made.
+
+A repeat publication while a position is open is a **no-op** — verified on the live data:
+20 membership rows across two weeks produce 10 positions, not 20. Repeats are read only
+at maturity, by the roll decision.
+
+The `SINCE` column shows the **currently open call** and resets at each roll, which is the
+visible consequence of the roll rule. A cell reads `new`, never `0.0%`, until its entry
+open exists — a name published on Sunday from Friday's snapshot has no Monday open yet, and
+a zero would claim a flat week that has not happened.
 
 **The current price is a live quote, not the stored close.** `price_history` is only
 written by the Friday pipeline, so before this a `!picks` on a Wednesday quoted the
