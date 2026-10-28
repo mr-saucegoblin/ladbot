@@ -138,11 +138,11 @@ def _chip(ax, slot, y, label, score, helped):
 
 def render(picks, snap, scope, out_path=None) -> str:
     n = len(picks)
-    # 2.6 of title, the picks, then 2.9 of footer. The footer needs more room
+    # 2.6 of title, the picks, then 3.5 of footer. The footer needs more room
     # than its line count suggests: text is centred on its y, so the last line's
     # descenders fall below it and clip against the figure edge. 2.3 covered two
-    # lines; the return explainer makes three.
-    units = 2.6 + n * LINES_PER_PICK + 2.9
+    # lines; the explainer and the summary each need their own, making four.
+    units = 2.6 + n * LINES_PER_PICK + 3.5
     fig = plt.figure(figsize=(FIG_W_INCHES, units * LINE_H_INCHES), dpi=150)
     fig.patch.set_facecolor(_BG)
 
@@ -241,28 +241,36 @@ def render(picks, snap, scope, out_path=None) -> str:
 
     # ── footer ─────────────────────────────────────────────────────────────────
     #
-    # Three left-aligned lines, one right-aligned total. The return explainer
-    # first went on the same y as the chip-score line, right-aligned against its
-    # left: at this width the two ran straight through each other. Anything
-    # sharing a y with another string has to be short enough that it cannot
-    # reach it, and the only one that qualifies is the summary.
-    ax.text(X_LEFT, units - 2.15,
+    # FOUR lines, one string per line. No two strings share a y.
+    #
+    # This has now collided twice. First the return explainer was put
+    # right-aligned on the chip-score line and ran through it. Then the summary
+    # was left on the "cyan helped" line because it was short enough at the
+    # time - and it stopped being short the moment the as-of stamp was added to
+    # it, so it ran through that line instead.
+    #
+    # The rule that holds: a right-aligned string next to a left-aligned one is
+    # a collision waiting for someone to lengthen either end. Give every string
+    # its own y and the failure cannot recur.
+    ax.text(X_LEFT, units - 2.75,
             "% = price return from the open after it was first published",
             color=_TEXT, fontsize=7.5, fontfamily=MONO, va="center", ha="left",
             alpha=0.45)
-    ax.text(X_LEFT, units - 1.55,
+    ax.text(X_LEFT, units - 2.15,
             "chip score = how strongly it shows that trait, 0-100 vs sector",
             color=_TEXT, fontsize=7.5, fontfamily=MONO, va="center", ha="left",
             alpha=0.45)
-    ax.text(X_LEFT, units - 0.95,
+    ax.text(X_LEFT, units - 1.55,
             "cyan helped the score  ·  pink hurt it",
             color=_TEXT, fontsize=7.5, fontfamily=MONO, va="center", ha="left",
             alpha=0.45)
 
-    summary = qp.returns_summary(picks)
+    # Its own line, left-aligned with the rest, and a touch brighter: it is
+    # the only footer line carrying a number rather than a legend.
+    summary = qp.strategy_summary()
     if summary:
-        ax.text(X_RIGHT, units - 0.95, summary, color=_TEXT, fontsize=7.5,
-                fontfamily=MONO, va="center", ha="right", alpha=0.6)
+        ax.text(X_LEFT, units - 0.85, summary, color=_TEXT, fontsize=8,
+                fontfamily=MONO, va="center", ha="left", alpha=0.72)
 
     path = out_path or tempfile.NamedTemporaryFile(
         suffix="_ladbot_picks.png", delete=False).name

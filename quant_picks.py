@@ -16,6 +16,7 @@ It also means everyone asking on the same day gets the same answer from the same
 timestamped row, rather than a fresh roll of the dice each time.
 """
 
+import calendar
 import json
 import os
 import time
@@ -183,51 +184,81 @@ def universe_size(snap) -> int | None:
 
 
 
-# ── published-pick history ────────────────────────────────────────────────────
+# ── published picks, and the 3-month positions they imply ────────────────────
 #
-# What this answers: "how has each name done since LadBot first called it?"
+# THE STRATEGY, stated once so the code below has something to be checked
+# against:
 #
-# The rule is first-publication, not latest: a name that stays in the top ten
-# for six weeks keeps the entry it got on week one. Re-basing every week would
-# make a holder's number reset while they still held it, and would quietly hide
-# a loser by measuring it from a fresh, lower price each time.
+#   Every publication is a 3-month call. A name not already held is bought at
+#   the open on the first trading day after it is published, held for three
+#   calendar months, and sold at the open on the first trading day at or after
+#   maturity. If it is still being published when its position matures, a fresh
+#   3-month position opens. Equal weight per position. No costs, no dividends.
 #
-# Why a table rather than deriving it from `predictions`:
+# Why three months and not "hold while it stays in the top ten": the model is
+# `lambdarank_forward_return_3m` and the walk-forward that produced +3.46% at
+# t=2.28 ranked the universe at a month end, bought the top decile and held
+# three months. It never sold early. A weekly-rebalanced version of this list is
+# a different strategy that has never been measured, so publishing its return
+# would be quoting a number with nothing behind it.
 #
-#   1. Deriving means `rank <= PICKS_COUNT`, so raising PICKS_COUNT to 15 would
-#      retroactively claim the bot had recommended five more names all along.
-#   2. A snapshot can exist without ever having been posted - a pipeline run
-#      whose Sunday post failed. Predictions record what the model said; this
-#      records what was actually published, which is what a return should be
-#      measured against.
+# The uncomfortable consequence, kept on purpose: a name dropping out of the top
+# ten is NOT a sell. The call was "outperforms over three months", so the
+# position runs to maturity whatever the next week's ranking says. That is also
+# what makes the published number honest - a name the model goes quiet about
+# cannot disappear from the record.
 #
-# The entry PRICE is deliberately not stored. It cannot be: picks post on Sunday
-# from Friday's snapshot, and Monday's open does not exist yet. It is resolved
-# on read from price_history, which is insert-only (ON CONFLICT DO NOTHING), so
-# a resolved entry never moves afterwards.
+# MEMBERSHIP IS RECORDED PER WEEK, not just on first appearance. An earlier
+# version stored one row per ticker (`pick_history`) and so could not answer
+# "what was in the list on Oct 23" or "when did ARG drop out", which is exactly
+# what a strategy return needs. pick_history is superseded and no longer read.
 
-PICK_HISTORY_DDL = """
-    CREATE TABLE IF NOT EXISTS pick_history (
-        ticker       TEXT PRIMARY KEY,
-        first_posted DATE NOT NULL,
-        first_rank   INTEGER,
-        created_at   TIMESTAMPTZ DEFAULT NOW()
+HOLD_MONTHS = 3
+
+# How stale the standing list may be and still justify a roll. Picks publish
+# weekly, so a gap wider than this means three missed weeks - a broken pipeline,
+# not a quiet one. At that point nobody knows whether the model still likes the
+# name, and rolling on a months-old list would invent a recommendation it never
+# made. The honest action is to let the position mature and stop.
+ROLL_STALENESS_DAYS = 21
+
+PUBLISHED_PICKS_DDL = """
+    CREATE TABLE IF NOT EXISTS published_picks (
+        snapshot_date DATE    NOT NULL,
+        ticker        TEXT    NOT NULL,
+        rank          INTEGER,
+        created_at    TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (snapshot_date, ticker)
     )
 """
 
 
+def _add_months(d: date, n: int) -> date:
+    """
+    d plus n calendar months, clamped into a short month.
+
+    Jan 31 + 1 month has no answer, so it becomes Feb 28. Without the clamp the
+    date constructor raises and a single awkward entry date takes the post down.
+    """
+    total = d.month - 1 + n
+    year, month = d.year + total // 12, total % 12 + 1
+    return date(year, month, min(d.day, calendar.monthrange(year, month)[1]))
+
+
 def record_published(picks: list[dict], snap) -> int:
     """
-    Note that these names were published on `snap`. Returns how many were new.
+    Record which names were published on `snap`. Returns rows newly written.
 
-    PRIMARY KEY on ticker plus ON CONFLICT DO NOTHING *is* the "a repeat keeps
-    its original date" rule - there is no branch to get wrong.
+    One row per (snapshot, ticker): this is the membership history the strategy
+    is computed from, so it has to capture every week, not just the first time a
+    name shows up. The week a name drops out is unrecoverable after the fact -
+    nothing else in the database says the bot had been publishing it.
 
     `snap` is the snapshot date, not today. A Sunday post of Friday's list
-    records Friday, so the entry price lands on the following Monday's open,
-    which is the first price anyone reading the post could have traded at.
+    records Friday, so the entry lands on the following Monday's open, which is
+    the first price a reader could have traded at.
 
-    Never raises. Failing to record history must not stop the post going out.
+    Never raises. Failing to record must not stop the post going out.
     """
     if not picks or snap is None:
         return 0
@@ -235,22 +266,226 @@ def record_published(picks: list[dict], snap) -> int:
         conn = _conn()
         try:
             with conn.cursor() as cur:
-                cur.execute(PICK_HISTORY_DDL)
-                cur.execute("SELECT COUNT(*) AS n FROM pick_history")
+                cur.execute(PUBLISHED_PICKS_DDL)
+                cur.execute("SELECT COUNT(*) AS n FROM published_picks")
                 before = cur.fetchone()["n"]
                 cur.executemany(
-                    "INSERT INTO pick_history (ticker, first_posted, first_rank) "
-                    "VALUES (%s, %s, %s) ON CONFLICT (ticker) DO NOTHING",
-                    [(p["ticker"], snap, p.get("rank")) for p in picks])
-                cur.execute("SELECT COUNT(*) AS n FROM pick_history")
+                    "INSERT INTO published_picks (snapshot_date, ticker, rank) "
+                    "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                    [(snap, p["ticker"], p.get("rank")) for p in picks])
+                cur.execute("SELECT COUNT(*) AS n FROM published_picks")
                 after = cur.fetchone()["n"]
             conn.commit()
             return after - before
         finally:
             conn.close()
     except Exception as e:
-        print(f"[picks] could not record pick history: {e}")
+        print(f"[picks] could not record published picks: {e}")
         return 0
+
+
+def _price_series(cur, tickers: list[str], since: date) -> dict:
+    """{ticker: [(date, open, close), ...]} ascending, in one query."""
+    cur.execute("""
+        SELECT ticker, date, open, close FROM price_history
+         WHERE ticker = ANY(%s) AND date >= %s
+         ORDER BY ticker, date
+    """, (tickers, since))
+    out: dict = {}
+    for r in cur.fetchall():
+        out.setdefault(r["ticker"], []).append(
+            (r["date"], float(r["open"]) if r["open"] else None,
+             float(r["close"]) if r["close"] else None))
+    return out
+
+
+def positions(live: bool = True) -> list[dict]:
+    """
+    Every 3-month position the published lists imply, closed and open.
+
+    One rule generates both the first buy and the rolls: a publication opens a
+    position only when nothing is open for that ticker at the time. A repeat
+    while held does nothing, and the first publication at or after maturity
+    starts the next one - which is exactly "roll if still in the list".
+
+    Returns [] on any failure, so the post degrades to no strategy line rather
+    than to no post.
+    """
+    try:
+        conn = _conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT to_regclass('public.published_picks') AS t")
+                if cur.fetchone()["t"] is None:
+                    return []
+                cur.execute("SELECT snapshot_date, ticker FROM published_picks "
+                            "ORDER BY ticker, snapshot_date")
+                rows = cur.fetchall()
+                if not rows:
+                    return []
+                by_ticker: dict = {}
+                for r in rows:
+                    by_ticker.setdefault(r["ticker"], []).append(r["snapshot_date"])
+                first = min(r["snapshot_date"] for r in rows)
+                prices = _price_series(cur, list(by_ticker), first)
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[picks] could not build positions: {e}")
+        return []
+
+    quotes = live_prices(list(by_ticker)) if live else {}
+    calendar_dates = sorted({d for ds in by_ticker.values() for d in ds})
+    out = []
+
+    for ticker, dates in by_ticker.items():
+        series = prices.get(ticker) or []
+        if not series:
+            continue
+        held = set(dates)
+        last_date, _, last_close = series[-1]
+        pending = sorted(dates)
+        i = 0
+
+        while i < len(pending):
+            published = pending[i]
+            entry = next((r for r in series
+                          if r[0] > published and r[1] is not None), None)
+            if entry is None:
+                break                          # the next open has not traded yet
+
+            while True:
+                entry_date, entry_px, _ = entry
+                maturity = _add_months(entry_date, HOLD_MONTHS)
+                exit_row = next((r for r in series
+                                 if r[0] >= maturity and r[1] is not None), None)
+
+                if exit_row is not None:
+                    exit_date, exit_px, _ = exit_row
+                    state, as_of = "closed", None
+                else:
+                    q = quotes.get(ticker)
+                    exit_px = q["price"] if q else last_close
+                    exit_date = q["at"].date() if q and q.get("at") else last_date
+                    state, as_of = "open", (q or {}).get("at")
+
+                if entry_px and exit_px:
+                    out.append({
+                        "ticker": ticker, "published": published,
+                        "entry_date": entry_date, "entry_price": entry_px,
+                        "maturity": maturity, "exit_date": exit_date,
+                        "exit_price": exit_px, "state": state,
+                        "ret": exit_px / entry_px - 1,
+                        "live": state == "open" and ticker in quotes,
+                        "as_of": as_of,
+                    })
+
+                if exit_row is None:
+                    i = len(pending)           # still running; nothing follows it
+                    break
+
+                # Roll if the name was still being published AS OF maturity.
+                #
+                # Not "at the next publication after maturity": that waited for
+                # the following Friday and sat in cash for four days at every
+                # roll, which is both untested and a drag the backtest never
+                # had. The latest list on or before maturity is the one that
+                # was standing at the time, so a name still in it rolls
+                # straight on, selling and rebuying at the same open.
+                standing = max((d for d in calendar_dates if d <= maturity),
+                               default=None)
+                fresh = (standing is not None
+                         and (maturity - standing).days <= ROLL_STALENESS_DAYS)
+                if fresh and standing in held:
+                    published, entry = standing, exit_row
+                    continue
+
+                # Dropped before maturity: go flat, and pick up again only at
+                # the next publication after this position ended.
+                while i < len(pending) and pending[i] <= maturity:
+                    i += 1
+                break
+    return out
+
+
+def attach_returns(picks: list[dict], snap, live: bool = True) -> list[dict]:
+    """
+    Give each pick the return of its CURRENTLY OPEN position.
+
+    Not "since first ever published": under a rolling 3-month strategy a name
+    held continuously for a year is four separate calls, and the row should show
+    the one running now. The row therefore resets at each roll, which is the
+    visible consequence of the roll rule.
+    """
+    if not picks:
+        return picks
+    open_by_ticker = {p["ticker"]: p for p in positions(live=live)
+                      if p["state"] == "open"}
+    for p in picks:
+        pos = open_by_ticker.get(p["ticker"])
+        if not pos:
+            p["ret"] = None
+            continue
+        p["ret"] = pos["ret"]
+        p["entry_date"] = pos["entry_date"]
+        p["entry_price"] = pos["entry_price"]
+        p["first_posted"] = pos["published"]
+        p["maturity"] = pos["maturity"]
+        p["last_price"] = pos["exit_price"]
+        p["price_live"] = pos["live"]
+        p["price_as_of"] = pos["as_of"] or pos["exit_date"]
+    return picks
+
+
+def price_as_of(picks: list[dict]) -> str:
+    """
+    Where the current prices came from, for the label.
+
+    Read off the quote's own timestamp rather than assumed from the clock, so a
+    Sunday post says "Oct 23 16:00 ET" by itself: the last trade on a closed
+    market is Friday's close, and no weekend special case is needed to say so.
+    """
+    stamps = [p["price_as_of"] for p in picks
+              if p.get("price_live") and p.get("price_as_of")]
+    if stamps:
+        t = max(stamps).astimezone(ZoneInfo("America/Toronto"))
+        return f"as of {t:%b} {t.day} {t:%H:%M} ET"
+    dates = [p["price_as_of"] for p in picks
+             if not p.get("price_live") and p.get("price_as_of")]
+    if dates:
+        d = max(dates)
+        return f"as of {d:%b} {d.day} close"
+    return ""
+
+
+def strategy_summary(live: bool = True) -> str:
+    """
+    The headline: how every 3-month call has done, including names long gone.
+
+    Equal weight PER POSITION, which is the unit the backtest reported (decile
+    spread per 3 months) and the only one that does not need a capital model
+    invented for it - weekly cohorts overlap, so "the portfolio return" would
+    depend on an allocation rule nobody has specified.
+
+    Closed and open are stated separately once any have closed. They are
+    different claims: a closed position is a realised number, an open one is a
+    mark that can still move.
+    """
+    pos = positions(live=live)
+    if not pos:
+        return ""
+    rets = [p["ret"] for p in pos]
+    avg = sum(rets) / len(rets)
+    closed = [p for p in pos if p["state"] == "closed"]
+
+    bits = [f"strategy {avg * 100:+.1f}% avg per 3-month call",
+            f"{len(pos)} call{'' if len(pos) == 1 else 's'}"]
+    if closed:
+        done = sum(p["ret"] for p in closed) / len(closed)
+        bits.append(f"{len(closed)} closed {done * 100:+.1f}%")
+    else:
+        bits.append("none matured yet")
+    return "  ·  ".join(bits)
 
 
 # How long a batch of quotes stays good. One !picks calls attach_returns twice -
@@ -304,130 +539,6 @@ def live_prices(tickers: list[str]) -> dict:
     except Exception as e:
         print(f"[picks] live quotes unavailable, falling back to stored close: {e}")
         return {}
-
-
-def attach_returns(picks: list[dict], snap, live: bool = True) -> list[dict]:
-    """
-    Add first_posted / entry_date / entry_price / last_price / ret to each pick.
-
-    The CURRENT price is a live quote when one can be had, and the last stored
-    close otherwise. Before this, a !picks on a Wednesday quoted the previous
-    Friday, because nothing writes price_history except the weekly pipeline -
-    five days stale, and TOT was 4.6% out.
-
-    Each pick carries `price_live` and `price_as_of` so the footer can state
-    which it used. The number moving between Sunday's post and a Thursday check
-    is correct, and a reader has to be able to see why.
-
-    `ret` is a price return, not a total return. The stored prices come from
-    FMP's EOD endpoint, which is split-adjusted but ignores dividends
-    (2_fmp_pipeline.py stores adj_close as NULL because the stable API does not
-    return it). On a TSX top ten that understates the truth by whatever was paid
-    out, which is the honest direction to be wrong in.
-
-    `ret` is None when no entry price exists yet. That is the normal state of a
-    name published on Sunday from Friday's snapshot: Monday's open has not
-    happened. The caller shows "new" rather than a zero.
-    """
-    if not picks or snap is None:
-        return picks
-    try:
-        conn = _conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT to_regclass('public.pick_history') AS t")
-                if cur.fetchone()["t"] is None:
-                    return picks
-                cur.execute("""
-                    SELECT h.ticker, h.first_posted,
-                           e.entry_date,
-                           (SELECT open FROM price_history
-                             WHERE ticker = h.ticker AND date = e.entry_date) AS entry_price,
-                           (SELECT close FROM price_history
-                             WHERE ticker = h.ticker AND date <= %s
-                             ORDER BY date DESC LIMIT 1) AS last_price,
-                           (SELECT date FROM price_history
-                             WHERE ticker = h.ticker AND date <= %s
-                             ORDER BY date DESC LIMIT 1) AS last_date
-                    FROM pick_history h
-                    CROSS JOIN LATERAL (
-                        -- First trading day STRICTLY after publication.
-                        -- Strictly, because Friday's close was already in the
-                        -- model's features; Monday's open is the first price a
-                        -- reader could actually have paid.
-                        SELECT date AS entry_date FROM price_history
-                         WHERE ticker = h.ticker AND date > h.first_posted
-                         ORDER BY date LIMIT 1
-                    ) e
-                    WHERE h.ticker = ANY(%s)
-                """, (snap, snap, [p["ticker"] for p in picks]))
-                by_ticker = {r["ticker"]: r for r in cur.fetchall()}
-        finally:
-            conn.close()
-    except Exception as e:
-        print(f"[picks] could not compute returns: {e}")
-        return picks
-
-    quotes = live_prices([p["ticker"] for p in picks]) if live else {}
-
-    for p in picks:
-        r = by_ticker.get(p["ticker"])
-        if not r:
-            p["ret"] = None
-            continue
-        p["first_posted"] = r["first_posted"]
-        p["entry_date"] = r["entry_date"]
-        p["entry_price"] = r["entry_price"]
-
-        q = quotes.get(p["ticker"])
-        if q:
-            p["last_price"], p["price_as_of"], p["price_live"] = q["price"], q["at"], True
-        else:
-            p["last_price"], p["price_as_of"], p["price_live"] = r["last_price"], r["last_date"], False
-
-        if r["entry_price"] and p["last_price"] and float(r["entry_price"]) > 0:
-            p["ret"] = float(p["last_price"]) / float(r["entry_price"]) - 1
-        else:
-            p["ret"] = None
-    return picks
-
-
-def price_as_of(picks: list[dict]) -> str:
-    """
-    Where the current prices came from, for the footer.
-
-    Read off the quote's own timestamp rather than assumed from the clock, so a
-    Sunday post says "Fri 16:00" by itself: the last trade on a closed market is
-    Friday's close, and no weekend special case is needed to say so.
-    """
-    stamps = [p["price_as_of"] for p in picks
-              if p.get("price_live") and p.get("price_as_of")]
-    if stamps:
-        t = max(stamps).astimezone(ZoneInfo("America/Toronto"))
-        return f"as of {t:%b} {t.day} {t:%H:%M} ET"
-    dates = [p["price_as_of"] for p in picks
-             if not p.get("price_live") and p.get("price_as_of")]
-    if dates:
-        d = max(dates)
-        return f"as of {d:%b} {d.day} close"
-    return ""
-
-
-def returns_summary(picks: list[dict]) -> str:
-    """
-    One line for the footer: how the published list has done, equal weighted.
-
-    Equal weighted because that is what the list is - ten names, no sizing. A
-    cap-weighted number would describe a portfolio nobody was told to hold.
-    """
-    rets = [p["ret"] for p in picks if p.get("ret") is not None]
-    if not rets:
-        return ""
-    avg = sum(rets) / len(rets)
-    up = sum(1 for r in rets if r > 0)
-    stamp = price_as_of(picks)
-    line = f"avg {avg * 100:+.1f}% since first published  ({up}/{len(rets)} up)"
-    return f"{line}  ·  {stamp}" if stamp else line
 
 
 # Discord renders a fenced block tagged `ansi` with real SGR colour, which is the
@@ -860,8 +971,8 @@ def build_table_embed(n: int = 10) -> tuple[dict | None, str | None]:
         "blurb": model_blurb(picks, size, snap),
         "body": "```ansi\n" + "\n".join(rows) + "\n```",
         "footer": (f"{snap}  \u00b7  {scope}  \u00b7  "
-                   + (returns_summary(picks) or
-                      "SINCE = return from the open after first published")),
+                   + (strategy_summary() or
+                      "SINCE = return of the open 3-month call")),
         "color": 0xFF2D78,
         # Handed back so the caller can record what it actually posted
         # without running the query a second time.

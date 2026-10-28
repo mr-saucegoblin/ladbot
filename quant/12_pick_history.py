@@ -42,13 +42,18 @@ SERIES_START = datetime.date(2026, 10, 16)
 PUBLISHED_TOP_N = 10
 
 DDL = """
-    CREATE TABLE IF NOT EXISTS pick_history (
-        ticker       TEXT PRIMARY KEY,
-        first_posted DATE NOT NULL,
-        first_rank   INTEGER,
-        created_at   TIMESTAMPTZ DEFAULT NOW()
+    CREATE TABLE IF NOT EXISTS published_picks (
+        snapshot_date DATE    NOT NULL,
+        ticker        TEXT    NOT NULL,
+        rank          INTEGER,
+        created_at    TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (snapshot_date, ticker)
     )
 """
+
+# pick_history (one row per ticker, first appearance only) is SUPERSEDED. It
+# could not say what the list held in a given week or when a name dropped out,
+# which is exactly what a strategy return needs. Nothing reads it any more.
 
 # One row per (snapshot, ticker) for the published top N, using only the most
 # recent model run of each snapshot - a snapshot can hold several, and mixing
@@ -70,69 +75,37 @@ PUBLISHED = """
 """
 
 
-def first_publications(cur):
-    """{ticker: (first_posted, rank_on_that_date)} across the published series."""
+def membership(cur):
+    """[(snapshot_date, ticker, rank)] for every published top N."""
     cur.execute(PUBLISHED, (PUBLISHED_TOP_N, SERIES_START))
-    first = {}
-    for r in cur.fetchall():
-        if r["ticker"] not in first:          # rows arrive oldest-first
-            first[r["ticker"]] = (r["snapshot_date"], r["rank"])
-    return first
+    return [(r["snapshot_date"], r["ticker"], r["rank"])
+            for r in cur.fetchall()]
 
 
 def show(cur):
     """
-    Print the table and the returns, using the SAME pricing path as the bot.
+    Print every 3-month position the published lists imply, via the SAME code
+    path the bot uses.
 
-    This had its own SQL against price_history and so quoted the last stored
-    close, while Discord quotes a live quote. The two disagreed badly - ARG read
-    -13.74% here and -3.19% there on the same entry price, because the stored
-    close was five days old. One concept must have one implementation, so this
-    calls quant_picks.attach_returns() and prints what the post will print.
+    An earlier version had its own SQL against price_history and so quoted the
+    last stored close while Discord quoted a live one. They disagreed by ten
+    points on ARG. One concept, one implementation.
     """
     import quant_picks as qp
 
-    cur.execute("SELECT to_regclass('public.pick_history') AS t")
-    if cur.fetchone()["t"] is None:
-        print("  pick_history does not exist yet. Run without --show first.")
+    pos = qp.positions()
+    if not pos:
+        print("  No positions yet. Nothing published, or no price after it.")
         return
 
-    cur.execute("""SELECT ticker, first_posted, first_rank FROM pick_history
-                   ORDER BY first_posted, first_rank""")
-    rows = cur.fetchall()
-    if not rows:
-        print("  pick_history is empty.")
-        return
-
-    cur.execute("SELECT MAX(snapshot_date) AS d FROM predictions")
-    snap = cur.fetchone()["d"]
-
-    picks = qp.attach_returns([{"ticker": r["ticker"]} for r in rows], snap)
-    by_ticker = {p["ticker"]: p for p in picks}
-
-    print(f"  {'ticker':<9}{'published':<12}{'entry':<12}{'open':>8}{'now':>8}{'return':>9}")
-    rets = []
-    for r in rows:
-        p = by_ticker.get(r["ticker"], {})
-        ret = p.get("ret")
-        if ret is None:
-            op = lp = "-"
-            rs = "new"
-        else:
-            rets.append(ret)
-            op = f"{float(p['entry_price']):.2f}"
-            lp = f"{float(p['last_price']):.2f}"
-            rs = f"{ret * 100:+.2f}%"
-        print(f"  {r['ticker'].replace('.TO', ''):<9}{str(r['first_posted']):<12}"
-              f"{str(p.get('entry_date') or '-'):<12}{op:>8}{lp:>8}{rs:>9}")
-
-    if rets:
-        up = sum(1 for x in rets if x > 0)
-        print(f"\n  equal weighted: {sum(rets) / len(rets) * 100:+.2f}%   "
-              f"{up}/{len(rets)} up   {len(rets)} priced of {len(rows)}")
-    stamp = qp.price_as_of(picks)
-    if stamp:
-        print(f"  prices {stamp}")
+    print(f"  {'ticker':<8}{'published':<12}{'entry':<12}{'matures':<12}"
+          f"{'in':>8}{'now':>8}{'return':>9}  state")
+    for p in sorted(pos, key=lambda x: (x["entry_date"], x["ticker"])):
+        print(f"  {p['ticker'].replace('.TO', ''):<8}{str(p['published']):<12}"
+              f"{str(p['entry_date']):<12}{str(p['maturity']):<12}"
+              f"{p['entry_price']:>8.2f}{p['exit_price']:>8.2f}"
+              f"{p['ret'] * 100:>8.2f}%  {p['state']}")
+    print("\n  " + (qp.strategy_summary() or ""))
 
 
 def main():
@@ -147,32 +120,35 @@ def main():
             return
 
         cur.execute(DDL)
-        first = first_publications(cur)
-        if not first:
-            print(f"  No published snapshots on or after {SERIES_START}. Nothing to do.")
+        rows = membership(cur)
+        if not rows:
+            print(f"  No published snapshots on or after {SERIES_START}.")
             return
 
-        cur.execute("SELECT ticker FROM pick_history")
-        have = {r["ticker"] for r in cur.fetchall()}
-        todo = {t: v for t, v in first.items() if t not in have}
+        cur.execute("SELECT snapshot_date, ticker FROM published_picks")
+        have = {(r["snapshot_date"], r["ticker"]) for r in cur.fetchall()}
+        todo = [r for r in rows if (r[0], r[1]) not in have]
 
+        weeks = sorted({r[0] for r in rows})
         print(f"  published series starts {SERIES_START}, top {PUBLISHED_TOP_N}")
-        print(f"  {len(first)} distinct names published, {len(have)} already recorded, "
+        print(f"  {len(weeks)} published week(s): "
+              + ", ".join(str(w) for w in weeks))
+        print(f"  {len(rows)} membership rows, {len(have)} recorded, "
               f"{len(todo)} to add\n")
-        for t, (d, rank) in sorted(todo.items(), key=lambda kv: (kv[1][0], kv[1][1])):
-            print(f"    {t.replace('.TO', ''):<9} first published {d}  at #{rank}")
+        for d, t, rank in todo:
+            print(f"    {d}  #{rank:<3} {t.replace('.TO', '')}")
 
         if args.dry_run:
             print("\n  --dry-run: nothing written.")
             return
         if not todo:
-            print("\n  Nothing to add.")
+            print("\n  Nothing to add.\n")
+            show(cur)
             return
 
         cur.executemany(
-            "INSERT INTO pick_history (ticker, first_posted, first_rank) "
-            "VALUES (%s, %s, %s) ON CONFLICT (ticker) DO NOTHING",
-            [(t, d, rank) for t, (d, rank) in todo.items()])
+            "INSERT INTO published_picks (snapshot_date, ticker, rank) "
+            "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING", todo)
         conn.commit()
         print(f"\n  Wrote {len(todo)} rows.\n")
         show(cur)
