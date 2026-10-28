@@ -81,41 +81,58 @@ def first_publications(cur):
 
 
 def show(cur):
+    """
+    Print the table and the returns, using the SAME pricing path as the bot.
+
+    This had its own SQL against price_history and so quoted the last stored
+    close, while Discord quotes a live quote. The two disagreed badly - ARG read
+    -13.74% here and -3.19% there on the same entry price, because the stored
+    close was five days old. One concept must have one implementation, so this
+    calls quant_picks.attach_returns() and prints what the post will print.
+    """
+    import quant_picks as qp
+
     cur.execute("SELECT to_regclass('public.pick_history') AS t")
     if cur.fetchone()["t"] is None:
         print("  pick_history does not exist yet. Run without --show first.")
         return
-    cur.execute("""
-        SELECT h.ticker, h.first_posted, h.first_rank,
-               e.entry_date,
-               (SELECT open FROM price_history
-                 WHERE ticker = h.ticker AND date = e.entry_date) AS entry_price,
-               (SELECT close FROM price_history
-                 WHERE ticker = h.ticker ORDER BY date DESC LIMIT 1) AS last_price
-        FROM pick_history h
-        LEFT JOIN LATERAL (
-            SELECT date AS entry_date FROM price_history
-             WHERE ticker = h.ticker AND date > h.first_posted
-             ORDER BY date LIMIT 1
-        ) e ON TRUE
-        ORDER BY h.first_posted, h.first_rank
-    """)
+
+    cur.execute("""SELECT ticker, first_posted, first_rank FROM pick_history
+                   ORDER BY first_posted, first_rank""")
     rows = cur.fetchall()
-    print(f"  {'ticker':<9}{'published':<12}{'entry':<12}{'open':>8}{'last':>8}{'return':>9}")
+    if not rows:
+        print("  pick_history is empty.")
+        return
+
+    cur.execute("SELECT MAX(snapshot_date) AS d FROM predictions")
+    snap = cur.fetchone()["d"]
+
+    picks = qp.attach_returns([{"ticker": r["ticker"]} for r in rows], snap)
+    by_ticker = {p["ticker"]: p for p in picks}
+
+    print(f"  {'ticker':<9}{'published':<12}{'entry':<12}{'open':>8}{'now':>8}{'return':>9}")
     rets = []
     for r in rows:
-        if r["entry_price"] and r["last_price"]:
-            ret = float(r["last_price"]) / float(r["entry_price"]) - 1
-            rets.append(ret)
-            rs, op, lp = f"{ret * 100:+.2f}%", f"{float(r['entry_price']):.2f}", f"{float(r['last_price']):.2f}"
+        p = by_ticker.get(r["ticker"], {})
+        ret = p.get("ret")
+        if ret is None:
+            op = lp = "-"
+            rs = "new"
         else:
-            rs, op, lp = "new", "-", "-"
+            rets.append(ret)
+            op = f"{float(p['entry_price']):.2f}"
+            lp = f"{float(p['last_price']):.2f}"
+            rs = f"{ret * 100:+.2f}%"
         print(f"  {r['ticker'].replace('.TO', ''):<9}{str(r['first_posted']):<12}"
-              f"{str(r['entry_date'] or '-'):<12}{op:>8}{lp:>8}{rs:>9}")
+              f"{str(p.get('entry_date') or '-'):<12}{op:>8}{lp:>8}{rs:>9}")
+
     if rets:
         up = sum(1 for x in rets if x > 0)
         print(f"\n  equal weighted: {sum(rets) / len(rets) * 100:+.2f}%   "
               f"{up}/{len(rets)} up   {len(rets)} priced of {len(rows)}")
+    stamp = qp.price_as_of(picks)
+    if stamp:
+        print(f"  prices {stamp}")
 
 
 def main():
