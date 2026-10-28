@@ -646,6 +646,23 @@ that open exists the cell reads `new`, never `0.0%` — a zero would claim a fla
 has not happened, and the equal-weight average excludes unpriced names (`3/9 up`, not
 `3/10`).
 
+**The current price is a live quote, not the stored close.** `price_history` is only
+written by the Friday pipeline, so before this a `!picks` on a Wednesday quoted the
+previous Friday — five days stale, and on 2026-10-28 that put ARG **12.2%** off its actual
+price. `live_prices()` takes one batched `/stable/batch-quote` call for the whole list
+(the singular `/stable/quote` returns an empty list for a comma-separated `symbols`, which
+reads as "no data" rather than an error, so the plural endpoint is load-bearing). Results
+are cached for 120s because one `!picks` calls `attach_returns` twice — once for the embed,
+once for the image. On failure it falls back to the stored close: a quote service being
+down must degrade the post, not stop it.
+
+The footer therefore always states its source — `as of Oct 28 16:00 ET` or `as of Oct 23
+close` — read from the quote's own timestamp rather than the clock. That makes the Sunday
+post say `Oct 23 16:00 ET` by itself, since the last trade on a closed market *is* Friday's
+close, with no weekend special case. The consequence to expect: the number now moves
+between Sunday's post and a Thursday `!picks`. That is correct, and the label is what makes
+it legible rather than alarming.
+
 It is a **price** return, not total return: `adj_close` is NULL for all 1.53M rows because
 FMP's stable EOD endpoint does not return it. The OHLC is split-adjusted, so splits are
 handled and dividends are not, which understates the truth by whatever was paid out — the

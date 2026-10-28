@@ -18,7 +18,11 @@ timestamped row, rather than a fresh roll of the dice each time.
 
 import json
 import os
-from datetime import date
+import time
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
+
+import requests
 
 import psycopg2
 import psycopg2.extras
@@ -249,19 +253,81 @@ def record_published(picks: list[dict], snap) -> int:
         return 0
 
 
-def attach_returns(picks: list[dict], snap) -> list[dict]:
+# How long a batch of quotes stays good. One !picks calls attach_returns twice -
+# once for the embed, once for the image - and without this that is two
+# identical FMP calls a second apart. Also absorbs someone pressing !picks
+# repeatedly.
+QUOTE_TTL_SECONDS = 120
+_QUOTE_CACHE: dict = {"at": 0.0, "data": {}}
+
+
+def live_prices(tickers: list[str]) -> dict:
+    """
+    Last traded price per ticker from FMP, or {} if anything goes wrong.
+
+    One batched call for the whole list, not one per name: /stable/batch-quote
+    takes a comma-separated `symbols`. The singular /stable/quote returns an
+    empty list for a comma list, which looks like "no data" rather than an
+    error, so the plural endpoint is load-bearing here.
+
+    Returns {} rather than raising. A quote service being down must degrade the
+    post to stored closes, not stop it: price_history is always there, and a
+    slightly stale number beats no picks.
+
+    On a Sunday this returns Friday's close anyway, because that is the last
+    trade. The label downstream reads the quote's own timestamp rather than
+    assuming, so the weekend post says Friday without any special case.
+    """
+    key = os.getenv("FMP_API_KEY")
+    if not key or not tickers:
+        return {}
+
+    now = time.time()
+    if _QUOTE_CACHE["data"] and now - _QUOTE_CACHE["at"] < QUOTE_TTL_SECONDS:
+        return _QUOTE_CACHE["data"]
+
+    try:
+        r = requests.get("https://financialmodelingprep.com/stable/batch-quote",
+                         params={"symbols": ",".join(tickers), "apikey": key},
+                         timeout=8)
+        r.raise_for_status()
+        out = {}
+        for row in r.json() or []:
+            sym, px, ts = row.get("symbol"), row.get("price"), row.get("timestamp")
+            if sym and px:
+                out[sym] = {
+                    "price": float(px),
+                    "at": datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None,
+                }
+        _QUOTE_CACHE.update(at=now, data=out)
+        return out
+    except Exception as e:
+        print(f"[picks] live quotes unavailable, falling back to stored close: {e}")
+        return {}
+
+
+def attach_returns(picks: list[dict], snap, live: bool = True) -> list[dict]:
     """
     Add first_posted / entry_date / entry_price / last_price / ret to each pick.
 
-    `ret` is a price return, not a total return. The prices come from FMP's EOD
-    endpoint, which is split-adjusted but pays no attention to dividends
+    The CURRENT price is a live quote when one can be had, and the last stored
+    close otherwise. Before this, a !picks on a Wednesday quoted the previous
+    Friday, because nothing writes price_history except the weekly pipeline -
+    five days stale, and TOT was 4.6% out.
+
+    Each pick carries `price_live` and `price_as_of` so the footer can state
+    which it used. The number moving between Sunday's post and a Thursday check
+    is correct, and a reader has to be able to see why.
+
+    `ret` is a price return, not a total return. The stored prices come from
+    FMP's EOD endpoint, which is split-adjusted but ignores dividends
     (2_fmp_pipeline.py stores adj_close as NULL because the stable API does not
     return it). On a TSX top ten that understates the truth by whatever was paid
     out, which is the honest direction to be wrong in.
 
-    `ret` is None when the entry price does not exist yet. That is the normal
-    state of a name published on Sunday from Friday's snapshot: Monday's open
-    has not happened. The caller shows "new" rather than a zero.
+    `ret` is None when no entry price exists yet. That is the normal state of a
+    name published on Sunday from Friday's snapshot: Monday's open has not
+    happened. The caller shows "new" rather than a zero.
     """
     if not picks or snap is None:
         return picks
@@ -279,25 +345,30 @@ def attach_returns(picks: list[dict], snap) -> list[dict]:
                              WHERE ticker = h.ticker AND date = e.entry_date) AS entry_price,
                            (SELECT close FROM price_history
                              WHERE ticker = h.ticker AND date <= %s
-                             ORDER BY date DESC LIMIT 1) AS last_price
+                             ORDER BY date DESC LIMIT 1) AS last_price,
+                           (SELECT date FROM price_history
+                             WHERE ticker = h.ticker AND date <= %s
+                             ORDER BY date DESC LIMIT 1) AS last_date
                     FROM pick_history h
                     CROSS JOIN LATERAL (
-                        -- First trading day STRICTLY after publication. Strictly,
-                        -- because Friday's close was already in the model's
-                        -- features; Monday's open is the first price a reader
-                        -- could actually have paid.
+                        -- First trading day STRICTLY after publication.
+                        -- Strictly, because Friday's close was already in the
+                        -- model's features; Monday's open is the first price a
+                        -- reader could actually have paid.
                         SELECT date AS entry_date FROM price_history
                          WHERE ticker = h.ticker AND date > h.first_posted
                          ORDER BY date LIMIT 1
                     ) e
                     WHERE h.ticker = ANY(%s)
-                """, (snap, [p["ticker"] for p in picks]))
+                """, (snap, snap, [p["ticker"] for p in picks]))
                 by_ticker = {r["ticker"]: r for r in cur.fetchall()}
         finally:
             conn.close()
     except Exception as e:
         print(f"[picks] could not compute returns: {e}")
         return picks
+
+    quotes = live_prices([p["ticker"] for p in picks]) if live else {}
 
     for p in picks:
         r = by_ticker.get(p["ticker"])
@@ -307,12 +378,39 @@ def attach_returns(picks: list[dict], snap) -> list[dict]:
         p["first_posted"] = r["first_posted"]
         p["entry_date"] = r["entry_date"]
         p["entry_price"] = r["entry_price"]
-        p["last_price"] = r["last_price"]
-        if r["entry_price"] and r["last_price"] and float(r["entry_price"]) > 0:
-            p["ret"] = float(r["last_price"]) / float(r["entry_price"]) - 1
+
+        q = quotes.get(p["ticker"])
+        if q:
+            p["last_price"], p["price_as_of"], p["price_live"] = q["price"], q["at"], True
+        else:
+            p["last_price"], p["price_as_of"], p["price_live"] = r["last_price"], r["last_date"], False
+
+        if r["entry_price"] and p["last_price"] and float(r["entry_price"]) > 0:
+            p["ret"] = float(p["last_price"]) / float(r["entry_price"]) - 1
         else:
             p["ret"] = None
     return picks
+
+
+def price_as_of(picks: list[dict]) -> str:
+    """
+    Where the current prices came from, for the footer.
+
+    Read off the quote's own timestamp rather than assumed from the clock, so a
+    Sunday post says "Fri 16:00" by itself: the last trade on a closed market is
+    Friday's close, and no weekend special case is needed to say so.
+    """
+    stamps = [p["price_as_of"] for p in picks
+              if p.get("price_live") and p.get("price_as_of")]
+    if stamps:
+        t = max(stamps).astimezone(ZoneInfo("America/Toronto"))
+        return f"as of {t:%b} {t.day} {t:%H:%M} ET"
+    dates = [p["price_as_of"] for p in picks
+             if not p.get("price_live") and p.get("price_as_of")]
+    if dates:
+        d = max(dates)
+        return f"as of {d:%b} {d.day} close"
+    return ""
 
 
 def returns_summary(picks: list[dict]) -> str:
@@ -327,7 +425,9 @@ def returns_summary(picks: list[dict]) -> str:
         return ""
     avg = sum(rets) / len(rets)
     up = sum(1 for r in rets if r > 0)
-    return f"avg {avg * 100:+.1f}% since first published  ({up}/{len(rets)} up)"
+    stamp = price_as_of(picks)
+    line = f"avg {avg * 100:+.1f}% since first published  ({up}/{len(rets)} up)"
+    return f"{line}  ·  {stamp}" if stamp else line
 
 
 # Discord renders a fenced block tagged `ansi` with real SGR colour, which is the
